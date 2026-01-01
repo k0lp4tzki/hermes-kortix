@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://kortix.com/schema/kortix.schema.json
+#
+# kortix-project: the Kortix project manifest. Agents, what each may use,
+# triggers and sandboxes live here, committed beside your files.
+# Reference: https://kortix.com/docs/developers#kortixyaml-reference
+
+project:
+  name: "kortix-project"
+  description: A Kortix project.
+
+# Built-in agents. My Kortix, the agent you talk to, routes each task to the
+# right agent below. Delete this key or set it to false to leave it out.
+builtin_agents:
+  my_kortix: true
+
+# The agent a session or trigger runs when it names none. My Kortix starts
+# `worker` when it names no agent.
+default_agent: mykortix
+
+# Project skills: folders under skills/, registered by name. Each agent then
+# enables them with its own `skills:` grant.
+skills:
+  agent-browser: skills/agent-browser
+  convert-documents-to-markdown: skills/convert-documents-to-markdown
+  design-foundations: skills/design-foundations
+  docx: skills/docx
+  pdf: skills/pdf
+  presentations: skills/presentations
+  web-publishing-and-deployments: skills/web-publishing-and-deployments
+  webapp: skills/webapp
+  website-building: skills/website-building
+  xlsx: skills/xlsx
+
+agents:
+  worker:
+    description: "General-purpose worker: coding, research, writing, ops and data work, done end to end in its own sandbox."
+    mode: primary
+    permission: allow
+    prompt_file: agents/worker.md
+    # "*" is every name (quoted: a bare * is a YAML alias). `all` means the same.
+    tools: "*"
+    skills: "*"
+    connectors: "*"
+    secrets: "*"
+    kortix_permissions: "*"
+    workspace: { project_repository: true }
+
+# More you can add here, each with an example in the reference:
+#   sandbox.templates   a custom image or Dockerfile for sessions
+#   tools               your own, registered by name, then enabled per agent
+#   triggers            run an agent on a schedule or an event
