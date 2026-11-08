@@ -1,6 +1,6 @@
 # Project Memory
 
-The **project brain** for `kortix-project` — durable, team-shared notes
+The **project brain** for `Amber Comet` — durable, team-shared notes
 this project keeps about itself (purpose, connections, conventions,
 decisions, gotchas). It lives in git and is curated through change
 requests.

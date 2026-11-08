@@ -1,4 +1,4 @@
-# kortix-project
+# Amber Comet
 
 A Kortix project. Talk to **My Kortix** in the Kortix app. It routes each task
 to the right agent of this project and runs it with your permissions.
