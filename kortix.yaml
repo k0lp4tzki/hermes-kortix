@@ -45,11 +45,11 @@ agents:
     kortix_permissions: "*"
     workspace: { project_repository: true }
 
-  seucrity-agent:
+  security-agent:
     description: "Reviews every change request for security before it reaches main: finds vulnerabilities, unsafe defaults and leaked secrets, proves them, and says exactly how to fix them. Never writes product code."
     # all: a person can start it directly, and other agents can delegate a CR review to it.
     mode: all
-    prompt_file: agents/seucrity-agent.md
+    prompt_file: agents/security-agent.md
     # Read-only reviewer: no edit/write (fixes go in the review as suggested
     # patches), no image_gen, no agent/subagents. bash runs git, read-only
     # kortix CLI calls, scanners, tests and local proofs; the web tools look up CVEs.
