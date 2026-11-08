@@ -45,6 +45,53 @@ agents:
     kortix_permissions: "*"
     workspace: { project_repository: true }
 
+  seucrity-agent:
+    description: "Reviews every change request for security before it reaches main: finds vulnerabilities, unsafe defaults and leaked secrets, proves them, and says exactly how to fix them. Never writes product code."
+    # all: a person can start it directly, and other agents can delegate a CR review to it.
+    mode: all
+    prompt_file: agents/seucrity-agent.md
+    # Read-only reviewer: no edit/write (fixes go in the review as suggested
+    # patches), no image_gen, no agent/subagents. bash runs git, read-only
+    # kortix CLI calls, scanners, tests and local proofs; the web tools look up CVEs.
+    tools: [read, grep, glob, bash, web_search, scrape_webpage]
+    permission:
+      edit: deny
+      bash:
+        "*": allow
+        "git push*": deny
+        "git commit*": deny
+        "git merge*": deny
+        "git rebase*": deny
+        "git reset --hard*": deny
+        "git tag*": deny
+        "git branch -d*": deny
+        "git branch -D*": deny
+        "git branch --delete*": deny
+        "kortix cr open*": deny
+        "kortix cr merge *": deny
+        "kortix cr close*": deny
+        "kortix cr reopen*": deny
+        "kortix cr request-changes*": deny
+        "kortix review act*": deny
+        "kortix review bulk*": deny
+        "kortix secrets*": deny
+        "kortix connectors*": deny
+        "kortix triggers*": deny
+        "kortix agents*": deny
+        "kortix apps*": deny
+        "kortix projects*": deny
+        "gh *": deny
+    skills: [kortix-system, kortix-cli]
+    subagents: none
+    connectors: none
+    secrets: none
+    # Read the project, CRs and diffs; read the review inbox and submit a
+    # review there for human sign-off. No push, merge, close, secret or agent writes.
+    kortix_permissions: [project.read, project.gitops.read, project.review.read, project.review.submit]
+    # Checkout so it can read the code around a diff and fetch the CR branch.
+    # Pushing is impossible without project.gitops.push and denied in bash above.
+    workspace: { project_repository: true }
+
 # More you can add here, each with an example in the reference:
 #   sandbox.templates   a custom image or Dockerfile for sessions
 #   tools               your own, registered by name, then enabled per agent
