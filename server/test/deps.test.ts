@@ -66,3 +66,13 @@ describe('maintenance scope', () => {
     expect(maintenanceScope([{ resource_ids: ['nas'], match_tags: ['netz'], include_dependents: false }], nodes, edges)).toEqual(new Set(['nas', 'router']));
   });
 });
+
+import { planBulkEdges } from '../src/core/deps.js';
+describe('bulk dependency planning', () => {
+  it('links every selected resource to the target, skipping the target itself and duplicates', () => {
+    expect(planBulkEdges(['a', 'b', 'fw', 'a'], 'fw', 'selection_depends_on_target')).toEqual({ edges: [{ from: 'a', to: 'fw' }, { from: 'b', to: 'fw' }], skipped: ['fw'] });
+  });
+  it('supports the reverse direction', () => {
+    expect(planBulkEdges(['a', 'b'], 'proxy', 'target_depends_on_selection').edges).toEqual([{ from: 'proxy', to: 'a' }, { from: 'proxy', to: 'b' }]);
+  });
+});

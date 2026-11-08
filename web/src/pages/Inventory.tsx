@@ -7,6 +7,7 @@ import { useAuth } from '../lib/auth';
 import { CRIT_LABEL, CRITS, DISCOVERY_LABEL, KIND_LABEL, STATUS_RANK, STATUSES } from '../lib/meta';
 import { Badge, Empty, Icon, Modal, StatusBadge, Tags, useToast, Field } from '../components/ui';
 import { ResourceForm, ResourceDraft } from '../components/ResourceForm';
+import { BulkDependencyDialog } from '../components/BulkDependencyDialog';
 import { STATUS_LABEL } from '../lib/format';
 
 type R = Record<string, any>;
@@ -50,6 +51,7 @@ export default function Inventory() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   const [bulkSet, setBulkSet] = useState(false);
+  const [bulkDeps, setBulkDeps] = useState(false);
   const view = params.get('view') ?? 'all';
   const search = params.get('q') ?? '';
   const sortKey = params.get('sort') ?? 'status';
@@ -154,6 +156,7 @@ export default function Inventory() {
               <button className="sm" onClick={() => bulk.mutate({ action: 'enable_monitoring' })}>Überwachung an</button>
               <button className="sm" onClick={() => bulk.mutate({ action: 'disable_monitoring' })}>Überwachung aus</button>
               <button className="sm" onClick={() => setBulkSet(true)}>Felder setzen</button>
+              <button className="sm" onClick={() => setBulkDeps(true)}><Icon name="share" size={12} />Abhängigkeit setzen</button>
               <button className="sm danger" onClick={() => confirm(`${selected.size} Ressourcen löschen? Entdeckte Ressourcen landen wieder in der Discovery-Inbox.`) && bulk.mutate({ action: 'delete' })}>Löschen</button>
               <button className="ghost sm" onClick={() => setSelected(new Set())}>Auswahl aufheben</button>
             </div>
@@ -196,6 +199,7 @@ export default function Inventory() {
         </>
       )}
       {creating && <ResourceForm initial={{ name: '', kind: 'service', criticality: 'medium', tags: [], connection: {}, monitoring_enabled: true }} onClose={() => setCreating(false)} onSave={(d) => create.mutate(d)} busy={create.isPending} />}
+      {bulkDeps && <BulkDependencyDialog ids={[...selected]} onClose={() => setBulkDeps(false)} onDone={() => { setBulkDeps(false); setSelected(new Set()); }} />}
       {bulkSet && <BulkSet onClose={() => setBulkSet(false)} onSave={(set) => bulk.mutate({ action: 'set', set })} />}
     </div>
   );

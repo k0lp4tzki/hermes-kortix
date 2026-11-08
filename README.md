@@ -40,6 +40,9 @@ Alles löschen: `docker compose down -v`.
 2. **Inventar**: alle Ressourcen mit Suche, Filtern (Host, Typ, Compose-Projekt, Umgebung, Status,
    Kritikalität, Verantwortlich, Tags, Erkennung, Überwachung, Discovery-Status), Sortierung und
    Gruppierung; Massenbearbeitung; Ansichten „Fehlend/verwaist“ und „Duplikate“ (zusammenführen).
+   Mehrere Einträge markieren → **„Abhängigkeit setzen“** verknüpft alle in einem Schritt mit einer
+   Komponente (z. B. „alle markierten hängen von der Firewall ab“, mit VLAN/Subnetz), in beide
+   Richtungen, auch zum Entfernen; mit Vorschau.
 3. **Ressource → Checks**: Standard-Checks sind angelegt (Container-Zustand, Logs, Host-Metriken).
    Weitere Checks hinzufügen: HTTP(S) mit Statuscode/Body/JSON-Prüfungen, TCP, Ping, DNS, TLS,
    SSH-Banner, PostgreSQL, MySQL/MariaDB, Redis, systemd, Backup-Aktualität, Job-Heartbeat,
