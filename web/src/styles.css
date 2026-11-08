@@ -194,3 +194,4 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
   .grid2, .grid3, .form-grid { grid-template-columns: 1fr; }
   .search input { width: 100%; }
 }
+button.primary:disabled { background: var(--panel-2); border-color: var(--line-2); color: var(--muted); }
