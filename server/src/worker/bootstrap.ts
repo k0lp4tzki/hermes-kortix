@@ -1,6 +1,7 @@
 import { q, q1, tx } from '../db/pool.js';
 import { config } from '../lib/config.js';
 import { logger } from '../lib/log.js';
+import { createChecks, templatesFor } from '../checks/defaults.js';
 
 const log = logger('bootstrap');
 
@@ -9,6 +10,11 @@ const log = logger('bootstrap');
  * services are taken over automatically; everything else that is discovered waits in the inbox.
  */
 export async function bootstrap() {
+  await bootstrapV1();
+  await bootstrapV2();
+}
+
+async function bootstrapV1() {
   const done = await q1(`SELECT value FROM settings WHERE key = 'bootstrap_v1'`);
   if (done) return;
   await tx(async (c) => {
@@ -31,4 +37,19 @@ export async function bootstrap() {
     await q(`INSERT INTO settings(key, value) VALUES ('bootstrap_v1', $1)`, [{ at: new Date().toISOString() }], c);
   });
   log.info('created default discovery sources and rules');
+}
+
+/** v2 (checks): the platform itself as a monitored resource, default checks for existing resources. */
+async function bootstrapV2() {
+  const done = await q1(`SELECT value FROM settings WHERE key = 'bootstrap_v2'`);
+  if (done) return;
+  await tx(async (c) => {
+    const [p] = await q(`INSERT INTO resources(kind, name, display_name, origin, criticality, group_name, tags, metadata, monitoring_enabled, status, first_seen_at)
+      VALUES ('platform', 'hermes', 'Hermes Monitoring-Plattform', 'manual', 'critical', 'Hermes', '{hermes,self-monitoring}', '{"system":"hermes"}', true, 'pending', now()) RETURNING id`, [], c);
+    await createChecks(c, p.id, templatesFor({ kind: 'platform', attributes: {}, connection: {} }));
+    const existing = await q(`SELECT r.id, r.kind, r.discovered, r.connection FROM resources r WHERE r.origin = 'auto' AND NOT EXISTS (SELECT 1 FROM checks c WHERE c.resource_id = r.id)`, [], c);
+    for (const r of existing) await createChecks(c, r.id, templatesFor({ kind: r.kind, attributes: r.discovered, connection: r.connection }));
+    await q(`INSERT INTO settings(key, value) VALUES ('bootstrap_v2', $1)`, [{ at: new Date().toISOString() }], c);
+  });
+  log.info('created platform self-monitoring resource');
 }

@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import { q, q1, type Queryable } from '../db/pool.js';
 import type { DiscoveredItem, DiscoveryRule } from '../core/types.js';
+import { config } from '../lib/config.js';
 
 export interface AcceptOptions {
   sourceId: string;
@@ -67,4 +68,9 @@ export async function syncAutoStructure(db: Queryable) {
            JOIN resources t ON t.identity_key = k.key OR t.id = (SELECT resource_id FROM resource_aliases a WHERE a.identity_key = k.key)
            WHERE t.id <> r.id
            ON CONFLICT (from_id, to_id, type) DO NOTHING`, [], db);
+  // the platform resource depends on Hermes' own containers (self-monitoring topology)
+  await q(`INSERT INTO dependencies(from_id, to_id, type, strength, origin, description)
+           SELECT p.id, r.id, 'depends_on', 'hard', 'auto', 'Hermes-Komponente' FROM resources p JOIN resources r ON r.compose_project = $1 AND r.kind = 'container'
+           WHERE p.kind = 'platform' AND p.metadata->>'system' = 'hermes'
+           ON CONFLICT (from_id, to_id, type) DO NOTHING`, [config.composeProject], db);
 }

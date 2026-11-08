@@ -13,3 +13,7 @@ CREATE MATERIALIZED VIEW metrics_1h WITH (timescaledb.continuous) AS
   FROM metrics_5m GROUP BY 1, resource_id, metric WITH NO DATA;
 
 SELECT add_continuous_aggregate_policy('metrics_1h', start_offset => INTERVAL '3 days', end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '30 minutes');
+
+-- real-time aggregation: rollups include not-yet-materialized recent data
+ALTER MATERIALIZED VIEW metrics_5m SET (timescaledb.materialized_only = false);
+ALTER MATERIALIZED VIEW metrics_1h SET (timescaledb.materialized_only = false);

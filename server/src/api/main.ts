@@ -13,6 +13,8 @@ import { bootstrapAdmin, HttpError, registerAuth } from './auth.js';
 import { registerLive, startLiveRelay, liveClientCount } from './live.js';
 import { startHeartbeat } from '../lib/heartbeat.js';
 import { routeModules } from './routes/index.js';
+import { setDefaultChecksHook } from '../discovery/accept.js';
+import { defaultChecksHook } from '../checks/defaults.js';
 
 const log = logger('api');
 
@@ -20,6 +22,7 @@ async function main() {
   await waitForDb((m) => log.warn(m));
   await migrate();
   await bootstrapAdmin();
+  setDefaultChecksHook(defaultChecksHook);
 
   const app = Fastify({ logger: false, trustProxy: true, bodyLimit: 2 * 1024 * 1024 });
   await app.register(cookie);

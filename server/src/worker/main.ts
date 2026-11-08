@@ -5,13 +5,18 @@ import { migrate } from '../db/migrate.js';
 import { startHeartbeat } from '../lib/heartbeat.js';
 import { loops, loopStats } from './loops.js';
 import { bootstrap } from './bootstrap.js';
+import { setDefaultChecksHook } from '../discovery/accept.js';
+import { defaultChecksHook } from '../checks/defaults.js';
+import { applyRetention } from './retention.js';
 
 const log = logger('worker');
 
 async function main() {
   await waitForDb((m) => log.warn(m));
   await migrate();
+  setDefaultChecksHook(defaultChecksHook);
   await bootstrap();
+  await applyRetention();
   startHeartbeat('worker', () => loopStats());
   for (const l of loops) runLoop(l.name, l.everyMs, l.fn);
   log.info('worker started', { loops: loops.map((l) => l.name) });
