@@ -14,13 +14,24 @@ describe('dependency suggestions', () => {
     expect(s[0].evidence).toContain('app01');
   });
 
-  it('VMware: no suggestion when the discovered VM already hangs below its host; NFS datastores point to the NAS', () => {
+  it('storage is the base: the VM with disks on the NAS depends on it, the ESXi host only on its gateway', () => {
     const s = suggestDependencies({ ...base,
-      resources: [r('hv', 'hypervisor', ['10.1.1.254'], { identityKey: 'vmware-host:esx1' }), r('vm', 'vm', ['10.1.1.155'], { identityKey: 'vmware-vm:abc', parentId: 'hv' }), r('nas', 'nas', ['10.1.1.20'])],
+      resources: [r('hv', 'hypervisor', ['10.1.1.254'], { identityKey: 'vmware-host:esx01' }), r('vm', 'vm', ['10.1.1.155'], { identityKey: 'vmware-vm:abc', parentId: 'hv' }),
+        r('nas', 'nas', ['10.1.1.20']), r('fw', 'firewall', ['10.1.1.3'])],
       edges: [{ from: 'vm', to: 'hv', suppressed: false }],
-      hypervisors: [{ identity: 'vmware-host:esx1', name: 'esx1', ips: ['10.1.1.254'], datastores: [{ name: 'nfs-vms', remote_host: '10.1.1.20' }] }],
-      vms: [{ vmIdentity: 'vmware-vm:abc', name: 'app01', ips: ['10.1.1.155'], hostIdentity: 'vmware-host:esx1', datastores: [{ name: 'nfs-vms', remote_host: '10.1.1.20' }] }] });
-    expect(s.map((x) => `${x.from}>${x.to}:${x.type}`).sort()).toEqual(['hv>nas:uses_storage', 'vm>nas:uses_storage']);
+      hypervisors: [{ identity: 'vmware-host:esx01', name: 'esx01.lab', ips: ['10.1.1.254'], gateway: '10.1.1.3', datastores: [{ name: 'local', remote_host: null }, { name: 'nfs-vms', remote_host: '10.1.1.20' }] }],
+      vms: [{ vmIdentity: 'vmware-vm:abc', name: 'app01', ips: ['10.1.1.155'], hostIdentity: 'vmware-host:esx01', datastores: [{ name: 'nfs-vms', remote_host: '10.1.1.20' }] }],
+      routes: [{ hostId: 'hv', gateway: '10.1.1.3', subnets: ['10.1.1.0/24'] }] });
+    expect(s.map((x) => `${x.from}>${x.to}:${x.type}:${x.confidence}`).sort()).toEqual(['hv>fw:network_link:sure', 'vm>nas:uses_storage:sure']);
+  });
+
+  it('same IP = same device: suggests a merge, never an edge between the two entries (OPNsense / endpoint 10.1.1.3)', () => {
+    const s = suggestDependencies({ ...base,
+      resources: [r('host', 'host', ['10.1.1.10']), r('opn', 'firewall', ['10.1.1.3']), r('ep', 'endpoint', ['10.1.1.3'])],
+      routes: [{ hostId: 'host', gateway: '10.1.1.3', subnets: ['10.1.1.0/24'] }] });
+    expect(s.find((x) => x.type === 'same_as')).toMatchObject({ from: 'ep', to: 'opn', confidence: 'sure' });
+    expect(s.find((x) => x.from === 'host' && x.type === 'network_link')).toMatchObject({ to: 'opn' });
+    expect(s.some((x) => x.type !== 'same_as' && ((x.from === 'ep' && x.to === 'opn') || (x.from === 'opn' && x.to === 'ep')))).toBe(false);
   });
 
   it('connections: maps container IP + port and published host ports to the providing resource and its role', () => {
@@ -41,11 +52,12 @@ describe('dependency suggestions', () => {
 
   it('routing and DNS: gateway and resolver, plus subnet neighbours as hints', () => {
     const s = suggestDependencies({ ...base,
-      resources: [r('host', 'host', ['10.1.1.10']), r('gw', 'router', ['10.1.1.1']), r('nas', 'nas', ['10.1.1.20']), r('far', 'host', ['10.9.9.9'])],
+      resources: [r('host', 'host', ['10.1.1.10']), r('gw', 'router', ['10.1.1.1']), r('nas', 'nas', ['10.1.1.20']), r('pi', 'endpoint', ['10.1.1.30']), r('far', 'host', ['10.9.9.9'])],
       routes: [{ hostId: 'host', gateway: '10.1.1.1', subnets: ['10.1.1.0/24'] }],
       dns: [{ hostId: 'host', nameservers: ['10.1.1.53'] }] });
     expect(s.find((x) => x.from === 'host' && x.to === 'gw')).toMatchObject({ confidence: 'evidence', type: 'network_link' });
-    expect(s.find((x) => x.from === 'nas' && x.to === 'gw')).toMatchObject({ confidence: 'hint' });
+    expect(s.find((x) => x.from === 'pi' && x.to === 'gw')).toMatchObject({ confidence: 'hint' });
+    expect(s.some((x) => x.from === 'nas')).toBe(false); // storage is the base layer
     expect(s.some((x) => x.from === 'far')).toBe(false);
     expect(s.find((x) => x.type === 'resolves_via')).toMatchObject({ to: null, target: { host: '10.1.1.53', kind: 'dns' } });
   });

@@ -33,7 +33,8 @@ export function mapVsphere(hosts: VsphereObject[], vms: VsphereObject[], datasto
       attributes: {
         product: h.props['summary.config.product.fullName'] ?? null, vendor: hw.vendor ?? null, model: hw.model ?? null, cpu_model: hw.cpuModel ?? null,
         cpus: hw.numCpuCores ? Number(hw.numCpuCores) : null, mem_total: hw.memorySize ? Number(hw.memorySize) : null,
-        ips, state: h.props['runtime.connectionState'] ?? null, power_state: h.props['runtime.powerState'] ?? null,
+        ips, gateway: isV4(h.props['config.network.ipRouteConfig']?.defaultGateway) ? h.props['config.network.ipRouteConfig'].defaultGateway : null,
+        state: h.props['runtime.connectionState'] ?? null, power_state: h.props['runtime.powerState'] ?? null,
         datastores: dsInfo(h.props.datastore), vmware_moid: h.moid, vmware_endpoint: endpointHost,
       },
       connection: { host: ips[0] ?? endpointHost },
@@ -79,7 +80,7 @@ export const vmwareAdapter: DiscoveryAdapter = {
     const c = new VsphereClient(source.config.url, { allowUntrusted: source.config.allow_untrusted !== false });
     try {
       await c.connect(source.config.username, await password(source));
-      const hosts = await c.list('HostSystem', ['name', 'summary.hardware', 'summary.config.product.fullName', 'config.network.vnic', 'runtime.connectionState', 'runtime.powerState', 'datastore']);
+      const hosts = await c.list('HostSystem', ['name', 'summary.hardware', 'summary.config.product.fullName', 'config.network.vnic', 'config.network.ipRouteConfig', 'runtime.connectionState', 'runtime.powerState', 'datastore']);
       const vms = await c.list('VirtualMachine', ['name', 'config.instanceUuid', 'config.guestFullName', 'config.template', 'runtime.host', 'runtime.powerState', 'guest.ipAddress', 'guest.net', 'guest.hostName', 'guest.toolsRunningStatus', 'summary.config.numCpu', 'summary.config.memorySizeMB', 'datastore']);
       const ds = await c.list('Datastore', ['name', 'summary.type', 'info']);
       return mapVsphere(hosts, vms, ds, new URL(source.config.url.includes('://') ? source.config.url : `https://${source.config.url}`).hostname);
