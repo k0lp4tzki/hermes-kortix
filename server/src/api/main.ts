@@ -26,6 +26,11 @@ async function main() {
 
   const app = Fastify({ logger: false, trustProxy: true, bodyLimit: 2 * 1024 * 1024 });
   await app.register(cookie);
+  // tolerate empty JSON bodies on action endpoints (POST …/run, …/test)
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    try { done(null, body ? JSON.parse(body as string) : {}); } catch (e) { (e as any).statusCode = 400; done(e as Error, undefined); }
+  });
 
   app.setErrorHandler((err: any, req, reply) => {
     if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message });
