@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { notify, pool, q, q1, tx } from '../../db/pool.js';
-import { findDuplicates } from '../../core/reconcile.js';
+import { findDuplicates, itemIps } from '../../core/reconcile.js';
 import { RESOURCE_KINDS } from '../../core/types.js';
 import { audit, HttpError, requireRole } from '../auth.js';
 import { notFound, parse } from '../util.js';
 import { createChecks } from '../../checks/defaults.js';
+import { mergeResources } from '../../inventory/merge.js';
 
 const kind = z.enum(RESOURCE_KINDS as [string, ...string[]]);
 const crit = z.enum(['low', 'medium', 'high', 'critical']);
@@ -42,12 +43,12 @@ export default async function resourceRoutes(app: FastifyInstance) {
 
   app.get('/api/resources/duplicates', async () => {
     const rows = await q(`SELECT id, name, COALESCE(display_name, name) AS label, kind, origin, connection->>'host' AS host, connection->>'port' AS port,
-      discovered->>'container_id' AS container_id, connection->>'url' AS url FROM resources`);
+      discovered->>'container_id' AS container_id, connection->>'url' AS url, discovered, connection FROM resources`);
     const dismissed = new Set<string>(((await q1(`SELECT value FROM settings WHERE key = 'dismissed_duplicates'`))?.value ?? []) as string[]);
-    const groups = findDuplicates(rows.map((r) => ({ id: r.id, name: r.label, kind: r.kind, containerId: r.container_id, address: r.url ?? (r.host && r.port ? `${r.host}:${r.port}` : null) })))
+    const groups = findDuplicates(rows.map((r) => ({ id: r.id, name: r.label, kind: r.kind, containerId: r.container_id, ips: itemIps(r.discovered, r.connection), address: r.url ?? (r.host && r.port ? `${r.host}:${r.port}` : null) })))
       .filter((g) => !dismissed.has([...g.ids].sort().join(',')));
     const byId = new Map(rows.map((r) => [r.id, r]));
-    return groups.map((g) => ({ ...g, key: [...g.ids].sort().join(','), resources: g.ids.map((id) => byId.get(id)) }));
+    return groups.map((g) => ({ ...g, key: [...g.ids].sort().join(','), resources: g.ids.map((id) => { const { discovered, connection, ...r } = byId.get(id); void discovered; void connection; return r; }) }));
   });
 
   app.post('/api/resources/duplicates/dismiss', async (req) => {
@@ -183,33 +184,7 @@ export default async function resourceRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const { source_id } = parse(z.object({ source_id: z.string().uuid() }), req.body);
     if (source_id === id) throw new HttpError(400, 'Quelle und Ziel sind identisch');
-    await tx(async (c) => {
-      const target = await q1(`SELECT * FROM resources WHERE id = $1 FOR UPDATE`, [id], c);
-      const src = await q1(`SELECT * FROM resources WHERE id = $1 FOR UPDATE`, [source_id], c);
-      if (!target || !src) notFound('Ressource');
-      await q(`UPDATE checks SET resource_id = $1 WHERE resource_id = $2`, [id, source_id], c);
-      await q(`UPDATE resources SET parent_id = $1 WHERE parent_id = $2`, [id, source_id], c);
-      // re-point edges, dropping ones that would duplicate or self-loop
-      await q(`DELETE FROM dependencies d WHERE (d.from_id = $2 AND (d.to_id = $1 OR EXISTS (SELECT 1 FROM dependencies x WHERE x.from_id = $1 AND x.to_id = d.to_id AND x.type = d.type)))
-                 OR (d.to_id = $2 AND (d.from_id = $1 OR EXISTS (SELECT 1 FROM dependencies x WHERE x.to_id = $1 AND x.from_id = d.from_id AND x.type = d.type)))`, [id, source_id], c);
-      await q(`UPDATE dependencies SET from_id = $1 WHERE from_id = $2`, [id, source_id], c);
-      await q(`UPDATE dependencies SET to_id = $1 WHERE to_id = $2`, [id, source_id], c);
-      await q(`UPDATE events SET resource_id = $1 WHERE resource_id = $2`, [id, source_id], c);
-      await q(`UPDATE incidents SET resource_id = $1 WHERE resource_id = $2`, [id, source_id], c);
-      await q(`UPDATE resource_aliases SET resource_id = $1 WHERE resource_id = $2`, [id, source_id], c);
-      if (src.identity_key) {
-        await q(`INSERT INTO resource_aliases(identity_key, resource_id) VALUES ($1, $2) ON CONFLICT (identity_key) DO UPDATE SET resource_id = $2`, [src.identity_key, id], c);
-        await q(`UPDATE discovery_candidates SET resource_id = $1 WHERE identity_key = $2`, [id, src.identity_key], c);
-      }
-      // an auto resource merged into a manual one keeps feeding discovery data into the survivor
-      await q(`UPDATE resources SET tags = ARRAY(SELECT DISTINCT unnest(tags || $2::text[])), metadata = $3::jsonb || metadata,
-                 discovered = CASE WHEN discovered = '{}'::jsonb THEN $4::jsonb ELSE discovered END,
-                 source_id = COALESCE(source_id, $5), first_seen_at = LEAST(first_seen_at, $6), last_seen_at = GREATEST(last_seen_at, $7),
-                 discovery_status = COALESCE(discovery_status, $8), monitoring_enabled = monitoring_enabled OR $9, updated_at = now(), last_change_at = now() WHERE id = $1`,
-        [id, src.tags, src.metadata, src.discovered, src.source_id, src.first_seen_at, src.last_seen_at, src.discovery_status, src.monitoring_enabled], c);
-      await q(`DELETE FROM resources WHERE id = $1`, [source_id], c);
-      await q(`INSERT INTO events(resource_id, kind, message, actor) VALUES ($1,'merge',$2,$3)`, [id, `„${src.name}“ (${src.kind}) wurde hier zusammengeführt`, req.user!.username], c);
-    });
+    await tx(async (c) => { if (!(await mergeResources(c, id, source_id, req.user!.username))) notFound('Ressource'); });
     await audit(req, 'resource.merged', id, { source_id });
     await notify('inventory');
     return q1(`${RESOURCE_SELECT} WHERE r.id = $1`, [id]);

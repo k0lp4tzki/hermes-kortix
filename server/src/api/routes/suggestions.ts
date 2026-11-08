@@ -2,10 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { notify, q, q1, tx } from '../../db/pool.js';
 import { createChecks } from '../../checks/defaults.js';
+import { mergeResources } from '../../inventory/merge.js';
 import { audit, HttpError, requireRole } from '../auth.js';
 import { notFound, parse } from '../util.js';
 
-const LAYER: Record<string, number> = { wan: 0, router: 1, firewall: 1, switch: 2, access_point: 2, network: 2, dns: 3, dhcp: 3, nas: 3, storage: 3, hypervisor: 4, host: 5, vm: 6, platform: 7, container: 8 };
+const LAYER: Record<string, number> = { wan: 0, router: 1, firewall: 1, switch: 2, access_point: 2, network: 2, dns: 3, dhcp: 3, hypervisor: 4, host: 5, vm: 6, platform: 7, container: 8, nas: 10, storage: 10 };
 
 export default async function suggestionRoutes(app: FastifyInstance) {
   app.get('/api/suggestions', async (req) => {
@@ -16,7 +17,7 @@ export default async function suggestionRoutes(app: FastifyInstance) {
       WHERE s.status = COALESCE($1, 'pending') ORDER BY s.last_seen_at DESC LIMIT 1000`, [status ?? null]);
     // walkthrough order: from the network edge inwards (provider layer first), then confidence
     const conf = { sure: 0, evidence: 1, hint: 2 } as Record<string, number>;
-    return rows.sort((a, b) => (LAYER[a.to_kind ?? a.target?.kind] ?? 9) - (LAYER[b.to_kind ?? b.target?.kind] ?? 9) || conf[a.confidence] - conf[b.confidence] || a.from_name.localeCompare(b.from_name));
+    return rows.sort((a, b) => (a.type === 'same_as' ? 0 : 1) - (b.type === 'same_as' ? 0 : 1) || (LAYER[a.to_kind ?? a.target?.kind] ?? 9) - (LAYER[b.to_kind ?? b.target?.kind] ?? 9) || conf[a.confidence] - conf[b.confidence] || a.from_name.localeCompare(b.from_name));
   });
 
   app.post('/api/suggestions/analyze', async (req) => {
@@ -30,12 +31,17 @@ export default async function suggestionRoutes(app: FastifyInstance) {
   app.post('/api/suggestions/accept', async (req) => {
     requireRole(req, 'operator');
     const b = parse(decide, req.body);
-    let created = 0, newResources = 0;
+    let created = 0, newResources = 0, merged = 0;
     await tx(async (c) => {
       const rows = await q(`SELECT * FROM dependency_suggestions WHERE id = ANY($1) AND status = 'pending' FOR UPDATE`, [b.ids], c);
       // several suggestions may point to the same unknown target: create it once
       const madeFor = new Map<string, string>();
       for (const s of rows) {
+        if (s.type === 'same_as') {
+          // same machine under two entries: merge the less specific one into the other
+          if (s.to_id && (await mergeResources(c, s.to_id, s.from_id, req.user!.username))) merged++;
+          continue;
+        }
         let to = s.to_id as string | null;
         if (!to) {
           const t = s.target ?? {};
@@ -61,10 +67,10 @@ export default async function suggestionRoutes(app: FastifyInstance) {
         created++;
       }
     });
-    await audit(req, 'suggestion.accepted', `${created} Vorschläge`, { newResources });
+    await audit(req, 'suggestion.accepted', `${created} Vorschläge`, { newResources, merged });
     await notify('inventory');
     await notify('suggestions');
-    return { ok: true, created, newResources };
+    return { ok: true, created, newResources, merged };
   });
 
   app.post('/api/suggestions/reject', async (req) => {

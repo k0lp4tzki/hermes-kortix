@@ -21,6 +21,7 @@ const hostXml = vmXml.replace(/<objects>[\s\S]*<\/objects>/, `<objects><obj type
   <propSet><name>name</name><val xsi:type="xsd:string">esx1.lab</val></propSet>
   <propSet><name>config.network.vnic</name><val xsi:type="ArrayOfHostVirtualNic"><HostVirtualNic xsi:type="HostVirtualNic"><device>vmk0</device><spec><ip><dhcp>false</dhcp><ipAddress>10.1.1.254</ipAddress></ip><mac>00:11:22:33:44:55</mac></spec></HostVirtualNic></val></propSet>
   <propSet><name>datastore</name><val xsi:type="ArrayOfManagedObjectReference"><ManagedObjectReference type="Datastore" xsi:type="ManagedObjectReference">ds-1</ManagedObjectReference></val></propSet>
+  <propSet><name>config.network.ipRouteConfig</name><val xsi:type="HostIpRouteConfig"><defaultGateway>10.1.1.3</defaultGateway></val></propSet>
   <propSet><name>runtime.connectionState</name><val xsi:type="HostSystemConnectionState">connected</val></propSet></objects>`);
 const dsXml = vmXml.replace(/<objects>[\s\S]*<\/objects>/, `<objects><obj type="Datastore">ds-1</obj>
   <propSet><name>name</name><val xsi:type="xsd:string">nfs-vms</val></propSet>
@@ -35,7 +36,7 @@ describe('vSphere mapping', () => {
     const items = mapVsphere(objs(hostXml), objs(vmXml), objs(dsXml), '10.1.1.254');
     const hv = items.find((i) => i.kind === 'hypervisor')!;
     const vm = items.find((i) => i.kind === 'vm')!;
-    expect(hv).toMatchObject({ identityKey: 'vmware-host:esx1.lab', connection: { host: '10.1.1.254' } });
+    expect(hv).toMatchObject({ identityKey: 'vmware-host:esx1.lab', connection: { host: '10.1.1.254' }, attributes: { gateway: '10.1.1.3' } });
     expect(hv.attributes.datastores).toEqual([{ name: 'nfs-vms', type: 'NFS', remote_host: '10.1.1.20', remote_path: '/volume1/vms' }]);
     expect(vm).toMatchObject({ identityKey: 'vmware-vm:5012abcd-0000', name: 'app01', parentIdentityKey: 'vmware-host:esx1.lab', running: true, connection: { host: '10.1.1.155' } });
     expect(vm.attributes).toMatchObject({ ips: ['10.1.1.155'], macs: ['00:50:56:aa:bb:cc'], state: 'poweredOn' });

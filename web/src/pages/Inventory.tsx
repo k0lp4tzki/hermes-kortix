@@ -240,10 +240,10 @@ function Duplicates() {
   if (!dups.data?.length) return <div className="panel"><Empty>Keine wahrscheinlichen Duplikate gefunden.</Empty></div>;
   return (
     <div className="stack">
-      <div className="sub">Mögliche Duplikate nach Container-ID, Adresse und ähnlichem Namen. Beim Zusammenführen bleibt die gewählte Ressource erhalten; Checks, Abhängigkeiten, Ereignisse, Tags und die Discovery-Identität der anderen gehen auf sie über.</div>
+      <div className="sub">Sicher: gleiche IP-Adresse eines Geräts, gleiche Container-ID oder gleiche URL. Vermutung: nur ein ähnlicher Name – bitte prüfen. Beim Zusammenführen bleibt die gewählte Ressource erhalten; Checks, Abhängigkeiten, Ereignisse, Tags und die Discovery-Identität der anderen gehen auf sie über.</div>
       {dups.data.map((g) => (
         <div key={g.key} className="panel">
-          <div className="panel-head"><h2>{g.reason}</h2><div className="actions"><button className="ghost sm" onClick={() => dismiss.mutate(g.key)}>Kein Duplikat</button></div></div>
+          <div className="panel-head"><h2>{g.reason}</h2><Badge kind={g.confidence === 'sure' ? 'ok' : ''}>{g.confidence === 'sure' ? 'sicher' : 'Vermutung'}</Badge><div className="actions"><button className="ghost sm" onClick={() => dismiss.mutate(g.key)}>Kein Duplikat</button></div></div>
           <table className="t"><tbody>{g.resources.map((r: any) => (
             <tr key={r.id}><td><a onClick={() => nav(`/resources/${r.id}`)} style={{ cursor: 'pointer' }}>{r.label}</a></td><td>{KIND_LABEL[r.kind]}</td><td>{r.origin === 'auto' ? 'automatisch' : 'manuell'}</td>
               <td className="mono dim">{r.url ?? (r.host ? `${r.host}${r.port ? ':' + r.port : ''}` : '')}</td>

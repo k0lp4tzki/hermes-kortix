@@ -23,6 +23,7 @@ export type PlanAction =
   | { type: 'create_resource'; item: DiscoveredItem; rule: DiscoveryRule }
   | { type: 'upsert_candidate'; candidateId?: string; item: DiscoveredItem; status: 'pending' | 'ignored'; rule: DiscoveryRule | null; isNew: boolean }
   | { type: 'touch_candidate'; candidateId: string; item: DiscoveredItem }
+  | { type: 'attach_resource'; resourceId: string; item: DiscoveredItem; ip: string }
   | { type: 'mark_missing'; resourceId: string }
   | { type: 'mark_orphaned'; resourceId: string };
 
@@ -35,6 +36,16 @@ export interface ReconcileInput {
   now: Date;
   /** a resource missing for longer than this becomes orphaned */
   orphanAfterMs: number;
+  /** IPv4 → id of the one inventory resource (not a container) owning that address */
+  ipIndex?: Map<string, string>;
+}
+
+const usableIp = (ip: unknown): ip is string => typeof ip === 'string' && /^\d+\.\d+\.\d+\.\d+$/.test(ip) && !ip.startsWith('127.') && !ip.startsWith('169.254.');
+
+/** IPv4 addresses an item or resource claims (attributes.ips, attributes.ip, connection.host). */
+export function itemIps(attrs: Record<string, any> | null | undefined, connection?: Record<string, any> | null): string[] {
+  const a = attrs ?? {};
+  return [...new Set([...(Array.isArray(a.ips) ? a.ips : []), a.ip, connection?.host].filter(usableIp))];
 }
 
 function stable(v: unknown): string {
@@ -89,6 +100,16 @@ export function reconcile(input: ReconcileInput): PlanAction[] {
       plan.push({ type: 'touch_candidate', candidateId: cand.id, item });
       continue;
     }
+    // the same machine is already in the inventory under another name (same IP): attach, do not duplicate
+    if (item.kind !== 'container' && input.ipIndex) {
+      const ip = itemIps(item.attributes, item.connection).find((x) => input.ipIndex!.has(x));
+      const resId = ip ? input.ipIndex.get(ip)! : null;
+      if (ip && resId && !seenResourceIds.has(resId)) {
+        seenResourceIds.add(resId);
+        plan.push({ type: 'attach_resource', resourceId: resId, item, ip });
+        continue;
+      }
+    }
     const d = decide(input.rules, item, input.ctx);
     if (d.action === 'auto_accept' && d.rule) {
       plan.push({ type: 'create_resource', item, rule: d.rule });
@@ -120,31 +141,37 @@ export function normalizeName(name: string): string {
   return name.toLowerCase().replace(/^\//, '').replace(/[-_.](\d+)$/, '').replace(/[^a-z0-9]/g, '');
 }
 
-export interface DupResource { id: string; name: string; kind: string; address?: string | null; containerId?: string | null }
+export interface DupResource { id: string; name: string; kind: string; address?: string | null; containerId?: string | null; ips?: string[] }
+export interface DupGroup { reason: string; confidence: 'sure' | 'hint'; ids: string[] }
 
-/** Groups of resources that probably describe the same thing. */
-export function findDuplicates(resources: DupResource[]): Array<{ reason: string; ids: string[] }> {
-  const groups: Array<{ reason: string; ids: string[] }> = [];
+/**
+ * Resources that describe the same thing. "sure" groups rest on hard facts (same container id,
+ * same IPv4 address of a machine, same URL / host:port); "hint" groups only on a similar name.
+ * Containers are left out of the IP comparison: their addresses are internal to a docker network.
+ */
+export function findDuplicates(resources: DupResource[]): DupGroup[] {
+  const groups: DupGroup[] = [];
   const seenPairs = new Set<string>();
-  const add = (reason: string, ids: string[]) => {
-    const key = [...ids].sort().join(',');
-    if (ids.length < 2 || seenPairs.has(key)) return;
+  const sureLinked = new Set<string>();
+  const add = (reason: string, confidence: DupGroup['confidence'], ids: string[]) => {
+    const uniq = [...new Set(ids)];
+    const key = [...uniq].sort().join(',');
+    if (uniq.length < 2 || seenPairs.has(key)) return;
+    if (confidence === 'hint' && uniq.every((a) => uniq.every((b) => a === b || sureLinked.has(`${a}|${b}`)))) return;
     seenPairs.add(key);
-    groups.push({ reason, ids });
+    if (confidence === 'sure') for (const a of uniq) for (const b of uniq) sureLinked.add(`${a}|${b}`);
+    groups.push({ reason, confidence, ids: uniq });
   };
-  const bucket = (fn: (r: DupResource) => string | null | undefined) => {
+  const bucket = (fn: (r: DupResource) => Array<string | null | undefined>) => {
     const m = new Map<string, string[]>();
-    for (const r of resources) {
-      const k = fn(r);
-      if (!k) continue;
-      m.set(k, [...(m.get(k) ?? []), r.id]);
-    }
+    for (const r of resources) for (const k of new Set(fn(r))) if (k) m.set(k, [...(m.get(k) ?? []), r.id]);
     return m;
   };
-  for (const [k, ids] of bucket((r) => (r.containerId ? r.containerId : null))) add(`gleiche Container-ID ${k.slice(0, 12)}`, ids);
-  for (const [k, ids] of bucket((r) => (r.address ? r.address.toLowerCase() : null))) add(`gleiche Adresse ${k}`, ids);
-  for (const [k, ids] of bucket((r) => (['host', 'vm', 'hypervisor', 'nas'].includes(r.kind) ? 'host:' : 'svc:') + normalizeName(r.name))) {
-    add(`ähnlicher Name „${k.split(':')[1]}“`, ids);
+  for (const [k, ids] of bucket((r) => [r.containerId])) add(`gleiche Container-ID ${k.slice(0, 12)}`, 'sure', ids);
+  for (const [k, ids] of bucket((r) => (r.kind === 'container' ? [] : (r.ips ?? []).filter(usableIp)))) add(`gleiche IP-Adresse ${k}`, 'sure', ids);
+  for (const [k, ids] of bucket((r) => [r.address ? r.address.toLowerCase() : null])) add(`gleiche Adresse ${k}`, 'sure', ids);
+  for (const [k, ids] of bucket((r) => [(['host', 'vm', 'hypervisor', 'nas'].includes(r.kind) ? 'host:' : 'svc:') + normalizeName(r.name)])) {
+    add(`ähnlicher Name „${k.split(':')[1]}“ (nur Vermutung)`, 'hint', ids);
   }
-  return groups;
+  return groups.sort((a, b) => (a.confidence === b.confidence ? 0 : a.confidence === 'sure' ? -1 : 1));
 }

@@ -1,5 +1,5 @@
 import { pool, q, q1, tx, notify } from '../db/pool.js';
-import { reconcile, type ExistingResource, type ExistingCandidate } from '../core/reconcile.js';
+import { reconcile, itemIps, type ExistingResource, type ExistingCandidate } from '../core/reconcile.js';
 import type { DiscoveryRule } from '../core/types.js';
 import { adapters } from './registry.js';
 import { acceptItem, discoveredPayload, syncAutoStructure } from './accept.js';
@@ -45,7 +45,16 @@ export async function runSource(source: SourceRow & { orphan_after_s: number }) 
   const candidates: ExistingCandidate[] = (await q<any>(`SELECT id, identity_key, status FROM discovery_candidates WHERE source_id = $1`, [source.id]))
     .map((c) => ({ id: c.id, identityKey: c.identity_key, status: c.status }));
   const rules = await loadRules();
-  const plan = reconcile({ items, resources: existing, candidates, rules, ctx: { sourceId: source.id, sourceType: source.type }, now: new Date(), orphanAfterMs: source.orphan_after_s * 1000 });
+  // IP → resource for machines (not containers); addresses claimed by two resources are ambiguous and skipped
+  const ipIndex = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  for (const r of await q<any>(`SELECT id, discovered, connection FROM resources WHERE kind <> 'container' AND COALESCE(discovery_status, '') <> 'detached'`)) {
+    for (const ip of itemIps(r.discovered, r.connection)) {
+      if (ipIndex.has(ip) && ipIndex.get(ip) !== r.id) ambiguous.add(ip); else ipIndex.set(ip, r.id);
+    }
+  }
+  for (const ip of ambiguous) ipIndex.delete(ip);
+  const plan = reconcile({ items, resources: existing, candidates, rules, ctx: { sourceId: source.id, sourceType: source.type }, now: new Date(), orphanAfterMs: source.orphan_after_s * 1000, ipIndex });
 
   let created = 0, newPending = 0, changed = 0;
   await tx(async (c) => {
@@ -69,6 +78,27 @@ export async function runSource(source: SourceRow & { orphan_after_s: number }) 
               [a.resourceId, `Geändert: ${other.map((x) => describeChange(x.field, x.from, x.to)).join('; ')}`, { changes: other }], c);
           }
           if (a.reappeared) await q(`INSERT INTO events(resource_id, kind, severity, message) VALUES ($1,'discovery_back','ok','Wieder gefunden')`, [a.resourceId], c);
+          break;
+        }
+        case 'attach_resource': {
+          // same machine already in the inventory: keep it, add this identity and the discovered facts
+          const cur = await q1(`SELECT id, identity_key, kind, locked_fields, COALESCE(display_name, name) AS label FROM resources WHERE id = $1`, [a.resourceId], c);
+          if (!cur) break;
+          if (cur.identity_key) {
+            await q(`INSERT INTO resource_aliases(identity_key, resource_id) VALUES ($1,$2) ON CONFLICT (identity_key) DO UPDATE SET resource_id = $2`, [a.item.identityKey, cur.id], c);
+          }
+          const upgradeKind = ['endpoint', 'other'].includes(cur.kind) && !['endpoint', 'other'].includes(a.item.kind) && !(cur.locked_fields ?? []).includes('kind');
+          await q(`UPDATE resources SET identity_key = COALESCE(identity_key, $2), discovered = discovered || $3::jsonb, source_id = COALESCE(source_id, $4),
+                     discovery_status = COALESCE(discovery_status, 'active'), first_seen_at = COALESCE(first_seen_at, now()), last_seen_at = now(),
+                     kind = CASE WHEN $5 THEN $6 ELSE kind END, last_change_at = now(), updated_at = now() WHERE id = $1`,
+            [cur.id, a.item.identityKey, discoveredPayload(a.item), source.id, upgradeKind, a.item.kind], c);
+          await q(`INSERT INTO discovery_candidates(source_id, identity_key, kind, name, parent_identity_key, proposed, status, resource_id, decided_at, decided_by)
+                   VALUES ($1,$2,$3,$4,$5,$6,'accepted',$7,now(),$8)
+                   ON CONFLICT (source_id, identity_key) DO UPDATE SET status = 'accepted', resource_id = $7, proposed = $6, last_seen_at = now(), decided_at = now(), decided_by = $8`,
+            [source.id, a.item.identityKey, a.item.kind, a.item.name, a.item.parentIdentityKey ?? null, a.item, cur.id, `gleiche IP ${a.ip}`], c);
+          await q(`INSERT INTO events(resource_id, kind, severity, message, data) VALUES ($1,'discovery_attached','info',$2,$3)`,
+            [cur.id, `„${source.name}“ hat ${a.item.kind} „${a.item.name}“ gefunden – dieselbe Maschine (IP ${a.ip}), kein neuer Eintrag${upgradeKind ? `; Typ jetzt ${a.item.kind}` : ''}`, { identity_key: a.item.identityKey, ip: a.ip }], c);
+          changed++;
           break;
         }
         case 'create_resource':

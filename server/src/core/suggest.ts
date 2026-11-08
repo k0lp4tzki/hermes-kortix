@@ -12,7 +12,7 @@ export interface SugResource {
 }
 export interface SugEdge { from: string; to: string; suppressed: boolean }
 export interface VmFact { vmIdentity: string; name: string; ips: string[]; hostIdentity: string | null; datastores: Array<{ name: string; remote_host: string | null }> }
-export interface HypervisorFact { identity: string; name: string; ips: string[]; datastores: Array<{ name: string; remote_host: string | null }> }
+export interface HypervisorFact { identity: string; name: string; ips: string[]; gateway?: string | null; datastores: Array<{ name: string; remote_host: string | null }> }
 export interface ConnectionFact { fromId: string; remoteIp: string; remotePort: number; count: number }
 export interface RouteFact { hostId: string; gateway: string | null; subnets: string[] }
 export interface DnsFact { hostId: string; nameservers: string[] }
@@ -24,7 +24,7 @@ export interface Suggestion {
   target: { host: string; port?: number; kind: string; name: string } | null;
   type: string;
   strength: 'hard' | 'soft';
-  source: 'vmware' | 'connections' | 'routing' | 'dns';
+  source: 'vmware' | 'connections' | 'routing' | 'dns' | 'identity';
   confidence: 'sure' | 'evidence' | 'hint';
   evidence: string;
   data: Record<string, unknown>;
@@ -68,7 +68,9 @@ export function suggestDependencies(input: SuggestInput): Suggestion[] {
     else { linked.add(`${e.from}>${e.to}`); linked.add(`${e.to}>${e.from}`); }
   }
   const out = new Map<string, Suggestion>();
+  const sameMachine = (a: string, b: string) => { const x = byId.get(a), y = byId.get(b); return !!x && !!y && x.kind !== 'container' && y.kind !== 'container' && x.ips.some((ip) => y.ips.includes(ip)); };
   const add = (s: Omit<Suggestion, 'key'>) => {
+    if (s.type !== 'same_as' && s.to && sameMachine(s.from, s.to)) return;
     if (s.to && (s.to === s.from || linked.has(`${s.from}>${s.to}`) || removed.has(`${s.from}>${s.to}`))) return;
     const key = `${s.from}>${s.to ?? `ext:${s.target!.host}${s.target!.port ? ':' + s.target!.port : ''}`}>${s.type}`;
     const cur = out.get(key);
@@ -76,8 +78,20 @@ export function suggestDependencies(input: SuggestInput): Suggestion[] {
     if (!cur || rank[s.confidence] > rank[cur.confidence]) out.set(key, { ...s, key });
   };
   /** prefer the most specific resource for an IP: hypervisor/host/vm/nas over containers and endpoints */
-  const pickByIp = (ip: string, exclude?: string) => (byIp.get(ip) ?? []).filter((r) => r.id !== exclude)
-    .sort((a, b) => kindRank(a.kind) - kindRank(b.kind))[0];
+  const pickByIp = (ip: string, exclude?: string, prefer: string[] = []) => (byIp.get(ip) ?? []).filter((r) => r.id !== exclude)
+    .sort((a, b) => (prefer.includes(a.kind) ? 0 : 1) - (prefer.includes(b.kind) ? 0 : 1) || kindRank(a.kind) - kindRank(b.kind))[0];
+  const GATEWAY_KINDS = ['router', 'firewall', 'wan'];
+
+  // 0. identity: two inventory entries with the same IPv4 address are the same machine (merge, not an edge)
+  for (const [ip, list] of byIp) {
+    const machines = list.filter((r) => r.kind !== 'container').sort((a, b) => specificity(a.kind) - specificity(b.kind));
+    if (machines.length < 2) continue;
+    const keep = machines[0];
+    for (const other of machines.slice(1)) {
+      add({ from: other.id, to: keep.id, target: null, type: 'same_as', strength: 'hard', source: 'identity', confidence: 'sure',
+        evidence: `„${other.label}“ und „${keep.label}“ haben dieselbe IP-Adresse ${ip} – dasselbe Gerät; beim Übernehmen wird „${other.label}“ in „${keep.label}“ zusammengeführt`, data: { ip } });
+    }
+  }
 
   // 1. vSphere: VM → runs on → ESXi host; host/VM → NFS datastore server
   const hvResource = (identity: string | null, ips: string[] = []) => (identity && byIdentity.get(identity)) || ips.map((ip) => pickByIp(ip)).find(Boolean);
@@ -101,17 +115,14 @@ export function suggestDependencies(input: SuggestInput): Suggestion[] {
       }
     }
   }
+  // a hypervisor's own storage mounts are not dependencies (the VMs on them are); its network uplink is
   for (const h of input.hypervisors) {
     const hv = hvResource(h.identity, h.ips);
-    if (!hv) continue;
-    for (const ds of h.datastores) {
-      if (!ds.remote_host) continue;
-      const nas = pickByIp(ds.remote_host, hv.id);
-      if (nas) add({ from: hv.id, to: nas.id, target: null, type: 'uses_storage', strength: 'hard', source: 'vmware', confidence: 'sure',
-        evidence: `vSphere: Host „${h.name}“ bindet NFS-Datastore „${ds.name}“ von ${ds.remote_host} ein`, data: { datastore: ds.name } });
-      else if (isPrivate(ds.remote_host)) add({ from: hv.id, to: null, target: { host: ds.remote_host, port: 2049, kind: 'nas', name: `NFS ${ds.remote_host}` }, type: 'uses_storage', strength: 'hard',
-        source: 'vmware', confidence: 'sure', evidence: `vSphere: Host „${h.name}“ bindet NFS-Datastore „${ds.name}“ von ${ds.remote_host} ein (nicht im Inventar)`, data: { datastore: ds.name } });
-    }
+    if (!hv || !h.gateway) continue;
+    const gw = pickByIp(h.gateway, hv.id, GATEWAY_KINDS);
+    const ev = `vSphere: Default-Gateway von ESXi-Host „${h.name}“ ist ${h.gateway}`;
+    if (gw) add({ from: hv.id, to: gw.id, target: null, type: 'network_link', strength: 'hard', source: 'vmware', confidence: 'sure', evidence: ev, data: { gateway: h.gateway } });
+    else add({ from: hv.id, to: null, target: { host: h.gateway, kind: 'router', name: `Gateway ${h.gateway}` }, type: 'network_link', strength: 'hard', source: 'vmware', confidence: 'sure', evidence: `${ev} – nicht im Inventar`, data: { gateway: h.gateway } });
   }
 
   // 2. observed outbound TCP connections
@@ -137,7 +148,7 @@ export function suggestDependencies(input: SuggestInput): Suggestion[] {
   // 3. routing: host → default gateway; other machines in the same subnet probably use it too
   for (const r of input.routes) {
     if (!r.gateway) continue;
-    const gw = pickByIp(r.gateway, r.hostId);
+    const gw = pickByIp(r.gateway, r.hostId, GATEWAY_KINDS);
     const host = byId.get(r.hostId);
     if (!host) continue;
     const ev = `Routing-Tabelle von „${host.label}“: Default-Gateway ${r.gateway}`;
@@ -146,9 +157,11 @@ export function suggestDependencies(input: SuggestInput): Suggestion[] {
     if (!gw) continue;
     const subnet = r.subnets.find((s) => inCidr(r.gateway!, s));
     if (!subnet) continue;
+    const vmIps = new Set(input.vms.flatMap((v) => v.ips));
     for (const other of input.resources) {
-      if (other.id === host.id || other.id === gw.id || !['host', 'vm', 'hypervisor', 'nas', 'endpoint', 'storage', 'access_point', 'switch'].includes(other.kind)) continue;
-      if (other.kind === 'vm' && other.parentId) continue; // VMs reach the network through their hypervisor
+      // storage is the base layer, not a network client; VMs reach the network through their hypervisor
+      if (other.id === host.id || other.id === gw.id || !['host', 'hypervisor', 'endpoint', 'access_point', 'switch'].includes(other.kind)) continue;
+      if (other.ips.some((ip) => vmIps.has(ip))) continue;
       const ip = other.ips.find((x) => inCidr(x, subnet));
       if (ip) add({ from: other.id, to: gw.id, target: null, type: 'network_link', strength: 'hard', source: 'routing', confidence: 'hint',
         evidence: `${ip} liegt im selben Subnetz ${subnet} wie Gateway ${r.gateway} – nutzt es vermutlich als Gateway`, data: { subnet } });
@@ -167,6 +180,13 @@ export function suggestDependencies(input: SuggestInput): Suggestion[] {
     }
   }
   return [...out.values()];
+}
+
+/** lower = more specific; the most specific entry survives a merge */
+function specificity(kind: string) {
+  const order = ['hypervisor', 'vm', 'nas', 'router', 'firewall', 'switch', 'access_point', 'host', 'storage', 'database', 'dns', 'proxy', 'service', 'platform'];
+  const i = order.indexOf(kind);
+  return i < 0 ? (kind === 'endpoint' ? 90 : kind === 'other' ? 95 : 50) : i;
 }
 
 function kindRank(kind: string) {

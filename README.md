@@ -54,13 +54,22 @@ Alles löschen: `docker compose down -v`.
    ihres Anbieters (oder umgekehrt), danach Art/Stärke/VLAN im Dialog bestätigen; oder per Dialog anlegen (Anwendung → Datenbank,
    Proxy → Backend, Dienst → DNS, Backup → Quelle/Storage, Anwendung → externe API …).
    Container → Host und `docker compose depends_on` werden automatisch erkannt.
+   **Ebenen im Graphen**: Command Center und Abhängigkeitsgraph ordnen jede Komponente einer festen,
+   benannten Ebene zu – von oben nach unten: Internet & externe Dienste, Netzwerk (Router, Firewall,
+   Switch, DNS), Hosts & Hypervisoren, Virtuelle Maschinen, Container & Dienste, Storage (NAS) als Basis.
+   **Gleiches Gerät**: Ein neuer Fund mit einer IP-Adresse, die schon ein Eintrag im Inventar hat, wird
+   diesem Eintrag zugeordnet statt doppelt angelegt (z. B. VM „app01“ → vorhandener „Server 10.1.1.155“,
+   der dabei zum VM-Typ wird). Bereits doppelte Einträge mit gleicher IP schlägt Hermes zum
+   Zusammenführen vor, nie als Abhängigkeit.
    **Abhängigkeitsvorschläge**: Hermes analysiert jede Minute echte Hinweise und schlägt Kanten
    vor (Abhängigkeiten → Vorschläge, oder im Command Center „Abhängigkeiten prüfen“ als
    Schritt-für-Schritt-Walkthrough mit Hervorhebung im Graphen). Quellen und Sicherheit:
-   VMware-API (sicher: VM läuft auf ESXi-Host, Host/VM nutzt NFS-Datastore), beobachtete
+   VMware-API (sicher: VM läuft auf ESXi-Host, VM nutzt Storage, wenn ihre Platten auf einem
+   NFS-Datastore liegen, ESXi-Host → sein Default-Gateway; der Datastore-Mount des Hosts selbst ist
+   keine Abhängigkeit), beobachtete
    TCP-Verbindungen der Container und des Hosts (beobachtet: App → Datenbank/Cache/Broker,
    auch über veröffentlichte Ports), Routing-Tabelle und Resolver des Hosts (beobachtet:
-   Gateway, DNS), gleiches Subnetz wie das Gateway (Vermutung). Ziele, die noch nicht im
+   Gateway, DNS), gleiches Subnetz wie das Gateway (Vermutung; nicht für Storage und VMs). Ziele, die noch nicht im
    Inventar sind, werden beim Übernehmen mit Ping/TCP-Checks angelegt. Nichts wird ohne
    Bestätigung eingetragen; abgelehnte Vorschläge kommen nicht wieder.
 6. **Benachrichtigungen**: Webhook-Kanal anlegen (Test senden), Routing-Regel anlegen. Ohne

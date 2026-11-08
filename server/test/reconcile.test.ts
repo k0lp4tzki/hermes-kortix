@@ -67,6 +67,13 @@ describe('reconcile', () => {
     expect(plan[0]).toMatchObject({ type: 'update_resource', reappeared: true });
   });
 
+  it('attaches a find to the existing entry with the same IP instead of creating a duplicate', () => {
+    const plan = reconcile({ ...base, resources: [], ipIndex: new Map([['10.1.1.3', 'opnsense']]),
+      items: [item('net:10.1.1.3', { ip: '10.1.1.3', open_ports: [443] }, { kind: 'endpoint' }), item('docker:h/name/x', { ips: ['10.1.1.3'] })] });
+    expect(plan[0]).toMatchObject({ type: 'attach_resource', resourceId: 'opnsense', ip: '10.1.1.3' });
+    expect(plan[1]).toMatchObject({ type: 'upsert_candidate' }); // containers never match by IP
+  });
+
   it('keeps ignored candidates ignored and refreshes them', () => {
     const plan = reconcile({ ...base, items: [item('x')], resources: [], candidates: [{ id: 'c1', identityKey: 'x', status: 'ignored' }] });
     expect(plan).toEqual([expect.objectContaining({ type: 'touch_candidate', candidateId: 'c1' })]);
@@ -79,14 +86,17 @@ describe('reconcile', () => {
 });
 
 describe('duplicate detection', () => {
-  it('groups by container id, address and normalised name', () => {
+  it('reports hard evidence as sure and a similar name only as a hint', () => {
     const groups = findDuplicates([
-      { id: '1', name: 'Grafana', kind: 'service', address: 'http://10.0.0.5:3000' },
-      { id: '2', name: 'grafana-1', kind: 'container', containerId: 'abc' },
-      { id: '3', name: 'grafana-web', kind: 'endpoint', address: 'http://10.0.0.5:3000' },
-      { id: '4', name: 'nas', kind: 'host' },
-      { id: '5', name: 'NAS', kind: 'nas' },
+      { id: 'opn', name: 'OPNsense', kind: 'firewall', ips: ['10.1.1.3'] },
+      { id: 'ep', name: '10.1.1.3', kind: 'endpoint', ips: ['10.1.1.3'] },
+      { id: 'c1', name: 'grafana-1', kind: 'container', containerId: 'abc', ips: ['172.18.0.2'] },
+      { id: 'c2', name: 'grafana', kind: 'container', containerId: 'abc', ips: ['172.18.0.2'] },
+      { id: 'c3', name: 'other', kind: 'container', ips: ['172.18.0.2'] },
+      { id: 'nas', name: 'nas', kind: 'host' }, { id: 'NAS', name: 'NAS', kind: 'nas' },
     ]);
-    expect(groups.map((g) => g.ids.sort().join(','))).toEqual(expect.arrayContaining(['1,3', '1,2', '4,5']));
+    expect(groups.filter((g) => g.confidence === 'sure').map((g) => g.ids.sort().join(','))).toEqual(['c1,c2', 'ep,opn']);
+    expect(groups.find((g) => g.confidence === 'hint')?.ids.sort()).toEqual(['NAS', 'nas']);
+    expect(groups.some((g) => g.ids.includes('c3'))).toBe(false); // container IPs are internal
   });
 });

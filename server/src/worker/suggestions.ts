@@ -121,7 +121,7 @@ async function collectVmware(resources: any[]): Promise<{ vms: VmFact[]; hypervi
   for (const i of items.values()) {
     const ds = (i.attrs?.datastores ?? []).map((d: any) => ({ name: d.name, remote_host: d.remote_host ?? null }));
     if (i.key.startsWith('vmware-vm:')) vms.push({ vmIdentity: i.key, name: i.name, ips: i.attrs?.ips ?? [], hostIdentity: i.parent, datastores: ds });
-    else if (i.key.startsWith('vmware-host:')) hypervisors.push({ identity: i.key, name: i.name, ips: i.attrs?.ips ?? [], datastores: ds });
+    else if (i.key.startsWith('vmware-host:')) hypervisors.push({ identity: i.key, name: i.name, ips: i.attrs?.ips ?? [], gateway: i.attrs?.gateway ?? null, datastores: ds });
   }
   return { vms, hypervisors };
 }
