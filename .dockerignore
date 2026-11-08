@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+.git
+.kortix
+agents
+skills
+memory
+*.md
+.env

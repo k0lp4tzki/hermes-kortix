@@ -1,0 +1,7 @@
+packages:
+  - server
+  - web
+allowBuilds:
+  esbuild: true
+overrides:
+  fast-json-stringify: 7.3.1

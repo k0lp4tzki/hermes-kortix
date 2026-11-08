@@ -1,20 +1,22 @@
-# Amber Comet
+# Hermes – Homelab Monitoring
 
-A Kortix project. Talk to **My Kortix** in the Kortix app. It routes each task
-to the right agent of this project and runs it with your permissions.
+Hermes is an agentless monitoring platform for homelabs: inventory and discovery of hosts,
+Docker containers and services, real checks with a threshold-based state engine, dependency
+analysis with root-cause suppression, alerting via webhooks, long-term history in TimescaleDB
+and a dark NOC-style "Command Center" UI.
 
-This project starts with one agent, **Worker** (`agents.worker` in
-`kortix.yaml`, prompt in `agents/worker.md`). It does general-purpose work:
-coding, research, writing, ops and data work. Add specialist agents next to
-it; My Kortix routes each task to the agent that fits.
+> Work in progress: see `docs/` and the change requests per milestone. Full documentation
+> follows with milestone 5.
 
-| Path | What it holds |
-| --- | --- |
-| `kortix.yaml` | The project: its agents and what each may use, triggers, sandbox. |
-| `agents/<name>.md` | One agent's instructions. `kortix.yaml` points at it with `prompt_file`. |
-| `skills/<name>/SKILL.md` | Skills an agent loads when a task matches. |
-| `memory/` | The project's memory. Agents read and add to it. |
+## Quick start
 
-Add an agent, a skill or a trigger by asking My Kortix, in **Customize** and **Project admin**, or by
-editing `kortix.yaml`. Check the file with `kortix validate`. The full reference
-is at https://kortix.com/docs/developers#kortixyaml-reference.
+```bash
+cp .env.example .env      # change every value marked CHANGE ME
+docker compose up -d --build
+# open http://localhost:8080 and log in with HERMES_ADMIN_USER / HERMES_ADMIN_PASSWORD
+```
+
+## Kortix project files
+
+This repository is also a Kortix project: `kortix.yaml`, `agents/`, `skills/` and `memory/`
+configure the Kortix agents working on it and are not part of the Hermes product.

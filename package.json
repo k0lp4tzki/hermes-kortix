@@ -1,0 +1,12 @@
+{
+  "name": "hermes",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Hermes - agentless homelab monitoring platform",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm --filter @hermes/server test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "packageManager": "pnpm@11.15.1"
+}
