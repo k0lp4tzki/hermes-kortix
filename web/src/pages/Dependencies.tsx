@@ -35,7 +35,7 @@ export default function Dependencies() {
       </div>
       <div className="toolbar">
         <div className="tabs"><button className={`tab ${tab === 'graph' ? 'active' : ''}`} onClick={() => setTab('graph')}>Graph</button><button className={`tab ${tab === 'list' ? 'active' : ''}`} onClick={() => setTab('list')}>Liste<span className="n">{deps.data?.filter((d) => !d.suppressed).length ?? 0}</span></button></div>
-        {tab === 'graph' && can('operator') && <span className="sub">Zum Verbinden vom oberen Punkt einer Komponente auf den unteren Punkt ihres Anbieters ziehen.</span>}
+        {tab === 'graph' && can('operator') && <span className="sub">Verbinden: vom oberen Punkt „Abhängig von“ zum unteren Punkt „Sind abhängig von dieser Ressource“ des Anbieters ziehen (oder umgekehrt).</span>}
         <div className="spacer" />
         {tab === 'list' && <label className="check"><input type="checkbox" checked={showSuppressed} onChange={(e) => setShowSuppressed(e.target.checked)} />entfernte automatische anzeigen</label>}
         <div className="search"><Icon name="search" /><input placeholder="Komponente suchen" value={search} onChange={(e) => setSearch(e.target.value)} /></div>

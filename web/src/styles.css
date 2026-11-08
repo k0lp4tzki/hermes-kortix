@@ -242,3 +242,15 @@ button.primary:disabled { background: var(--panel-2); border-color: var(--line-2
 .react-flow__controls button { background: var(--panel); border-color: var(--line); color: var(--text-2); fill: var(--text-2); }
 .react-flow__controls button:hover { background: var(--panel-2); }
 @media (max-width: 1100px) { .cc-body { grid-template-columns: 1fr; } .cc-map { height: 60vh; } }
+
+/* topology handles: top = "Abhängig von", bottom = "Sind abhängig von dieser Ressource" */
+.react-flow .hx-handle { width: 8px; height: 8px; background: #2a3a4b; border: 1px solid #0d141c; transition: transform 120ms, background 120ms; }
+.react-flow:not(.hx-connectable) .hx-handle { opacity: 0; pointer-events: none; }
+.hx-connectable .hx-handle { width: 12px; height: 12px; background: #1d2b39; border: 1.5px solid #38bdf8; }
+.hx-connectable .hx-handle:hover, .hx-connectable .react-flow__handle.connectingto, .hx-connectable .react-flow__handle.valid { background: #38bdf8; transform: translate(-50%, var(--hx-y)) scale(1.25); }
+.hx-up { --hx-y: -50%; } .hx-down { --hx-y: 50%; }
+.hx-handle::after { content: attr(data-label); position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; font: 10.5px var(--sans); color: #7dd3fc;
+  background: #0b1118f0; border: 1px solid #1f3346; border-radius: 5px; padding: 1px 6px; pointer-events: none; opacity: 0; transition: opacity 120ms; z-index: 10; }
+.hx-up::after { bottom: 14px; } .hx-down::after { top: 14px; }
+.hx-connectable .react-flow__node:hover .hx-handle::after, .hx-connectable .react-flow__node.selected .hx-handle::after, .hx-connectable.hx-dragging .hx-handle::after { opacity: 1; }
+.react-flow__node:hover { z-index: 5 !important; }

@@ -10,6 +10,7 @@ import { Badge, Empty, Field, Icon, Modal, StatusBadge, useToast } from '../comp
 import { Topology, KIND_CODE } from '../components/Topology';
 import { EventFeed } from '../components/EventFeed';
 import { IncidentDetail, MaintenanceDialog } from './Alerts';
+import { DependencyDialog } from '../components/DependencyDialog';
 
 const INFRA_KINDS = ['wan', 'router', 'firewall', 'switch', 'access_point', 'nas', 'hypervisor', 'vm', 'dns', 'dhcp', 'proxy', 'storage', 'external_api', 'service', 'database', 'network'];
 
@@ -30,6 +31,7 @@ export default function CommandCenter() {
   const [selected, setSelected] = useState<any | null>(null);
   const [incident, setIncident] = useState<string | null>(null);
   const [addInfra, setAddInfra] = useState(false);
+  const [newDep, setNewDep] = useState<{ from_id: string; to_id: string } | null>(null);
   const [now, setNow] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
 
@@ -99,7 +101,8 @@ export default function CommandCenter() {
       <div className="cc-body">
         <div className="cc-map">
           {graph.isLoading ? <Empty>Lade Topologie…</Empty> : nodes.length === 0 ? <Empty>Noch keine Ressourcen. Die Discovery füllt die Karte, sobald sie den ersten Lauf beendet hat.</Empty>
-            : <Topology data={graph.data} filter={filter} selectedId={sel?.id} onSelect={setSelected} />}
+            : <Topology data={graph.data} filter={filter} selectedId={sel?.id} onSelect={setSelected}
+                onConnect={can('operator') ? (from, to) => setNewDep({ from_id: from, to_id: to }) : undefined} />}
           <Legend />
         </div>
         <aside className="cc-rail">
@@ -122,6 +125,7 @@ export default function CommandCenter() {
         </aside>
       </div>
       {incident && <IncidentDetail id={incident} onClose={() => setIncident(null)} />}
+      {newDep && <DependencyDialog initial={newDep} onClose={() => setNewDep(null)} />}
       {addInfra && <InfraDialog nodes={nodes} onClose={() => setAddInfra(false)} />}
     </div>
   );
@@ -142,6 +146,7 @@ function Legend() {
       <span><span className="lg-box" style={{ borderColor: '#f43f5e' }} />Ursache</span>
       <span><span className="lg-box" style={{ borderColor: '#fb923c', borderStyle: 'dashed' }} />betroffen</span>
       <span><span className="lg-line" />hart</span><span><span className="lg-line soft" />weich</span>
+      <span title="Vom oberen Punkt einer Komponente zum unteren Punkt ihres Anbieters ziehen">oben: Abhängig von · unten: Sind abhängig von dieser Ressource</span>
     </div>
   );
 }

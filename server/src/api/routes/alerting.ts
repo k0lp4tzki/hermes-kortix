@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { notify, q, q1 } from '../../db/pool.js';
 import { sendWebhook } from '../../alerting/webhook.js';
+import { planBulkEdges } from '../../core/deps.js';
+import { tx } from '../../db/pool.js';
 import { audit, HttpError, requireRole } from '../auth.js';
 import { notFound, parse } from '../util.js';
 
@@ -51,6 +53,53 @@ export default async function alertingRoutes(app: FastifyInstance) {
     await audit(req, 'dependency.created', `${b.from_id} → ${b.to_id}`, { type: b.type });
     await notify('inventory');
     return row;
+  });
+
+  /**
+   * Batch: link (or unlink) many resources with one target, e.g. "all selected depend on the firewall".
+   * Existing edges of the same type are updated; removed automatic edges are restored.
+   */
+  app.post('/api/dependencies/bulk', async (req) => {
+    requireRole(req, 'operator');
+    const b = parse(z.object({
+      ids: z.array(z.string().uuid()).min(1).max(1000),
+      target_id: z.string().uuid(),
+      direction: z.enum(['selection_depends_on_target', 'target_depends_on_selection']).default('selection_depends_on_target'),
+      action: z.enum(['add', 'remove']).default('add'),
+      type: z.enum(DEP_TYPES),
+      strength: z.enum(['hard', 'soft']).default('hard'),
+      attributes: depBody.shape.attributes,
+      description: z.string().max(500).nullable().optional(),
+    }), req.body);
+    const target = await q1(`SELECT id, COALESCE(display_name, name) AS label FROM resources WHERE id = $1`, [b.target_id]);
+    if (!target) notFound('Ziel-Ressource');
+    const known = new Set((await q(`SELECT id FROM resources WHERE id = ANY($1)`, [b.ids])).map((r) => r.id));
+    const plan = planBulkEdges(b.ids.filter((id) => known.has(id)), b.target_id, b.direction);
+    let changed = 0;
+    await tx(async (c) => {
+      for (const e of plan.edges) {
+        if (b.action === 'add') {
+          await q(`INSERT INTO dependencies(from_id, to_id, type, strength, origin, attributes, description) VALUES ($1,$2,$3,$4,'manual',$5,$6)
+            ON CONFLICT (from_id, to_id, type) DO UPDATE SET suppressed = false, strength = $4, attributes = $5, description = COALESCE($6, dependencies.description)`,
+            [e.from, e.to, b.type, b.strength, b.attributes, b.description ?? null], c);
+          changed++;
+        } else {
+          // manual edges are deleted, automatic ones suppressed (discovery would re-create them)
+          const del = await q(`DELETE FROM dependencies WHERE from_id = $1 AND to_id = $2 AND type = $3 AND origin = 'manual' RETURNING id`, [e.from, e.to, b.type], c);
+          const sup = await q(`UPDATE dependencies SET suppressed = true WHERE from_id = $1 AND to_id = $2 AND type = $3 AND origin = 'auto' AND NOT suppressed RETURNING id`, [e.from, e.to, b.type], c);
+          changed += del.length + sup.length;
+        }
+      }
+      const verb = b.action === 'add' ? 'hinzugefügt' : 'entfernt';
+      const msg = b.direction === 'selection_depends_on_target' ? `Abhängigkeit ${verb} (Stapel): ${b.type} → ${target.label}` : `Abhängigkeit ${verb} (Stapel): ${target.label} ${b.type} → diese Ressource`;
+      for (const e of plan.edges) {
+        const rid = b.direction === 'selection_depends_on_target' ? e.from : e.to;
+        await q(`INSERT INTO events(resource_id, kind, message, actor) VALUES ($1,'config',$2,$3)`, [rid, msg, req.user!.username], c);
+      }
+    });
+    await audit(req, `dependency.bulk_${b.action}`, target.label, { count: plan.edges.length, type: b.type, direction: b.direction });
+    await notify('inventory');
+    return { ok: true, edges: plan.edges.length, changed, skipped: plan.skipped.length };
   });
 
   app.patch('/api/dependencies/:id', async (req) => {

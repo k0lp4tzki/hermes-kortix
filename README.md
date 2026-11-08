@@ -40,13 +40,18 @@ Alles löschen: `docker compose down -v`.
 2. **Inventar**: alle Ressourcen mit Suche, Filtern (Host, Typ, Compose-Projekt, Umgebung, Status,
    Kritikalität, Verantwortlich, Tags, Erkennung, Überwachung, Discovery-Status), Sortierung und
    Gruppierung; Massenbearbeitung; Ansichten „Fehlend/verwaist“ und „Duplikate“ (zusammenführen).
+   Mehrere Einträge markieren → **„Abhängigkeit setzen“** verknüpft alle in einem Schritt mit einer
+   Komponente (z. B. „alle markierten hängen von der Firewall ab“, mit VLAN/Subnetz), in beide
+   Richtungen, auch zum Entfernen; mit Vorschau.
 3. **Ressource → Checks**: Standard-Checks sind angelegt (Container-Zustand, Logs, Host-Metriken).
    Weitere Checks hinzufügen: HTTP(S) mit Statuscode/Body/JSON-Prüfungen, TCP, Ping, DNS, TLS,
    SSH-Banner, PostgreSQL, MySQL/MariaDB, Redis, systemd, Backup-Aktualität, Job-Heartbeat,
    Ablauf von Zugangsdaten. Zugangsdaten vorher unter **Einstellungen → Zugangsdaten** speichern.
 4. **Command Center → „+ Infrastruktur“**: Router, Firewall, Switch, WAN, NAS usw. anlegen und mit
    Hosts verbinden (VLAN/Subnetz als Kantenattribut). Mit Adresse/URL bekommen sie Ping/HTTP/TLS-Checks.
-5. **Abhängigkeiten**: Kanten im Graph ziehen oder per Dialog anlegen (Anwendung → Datenbank,
+5. **Abhängigkeiten**: Kanten im Graph (Command Center oder Abhängigkeiten) ziehen: vom oberen
+   Punkt „Abhängig von“ einer Komponente zum unteren Punkt „Sind abhängig von dieser Ressource“
+   ihres Anbieters (oder umgekehrt), danach Art/Stärke/VLAN im Dialog bestätigen; oder per Dialog anlegen (Anwendung → Datenbank,
    Proxy → Backend, Dienst → DNS, Backup → Quelle/Storage, Anwendung → externe API …).
    Container → Host und `docker compose depends_on` werden automatisch erkannt.
 6. **Benachrichtigungen**: Webhook-Kanal anlegen (Test senden), Routing-Regel anlegen. Ohne

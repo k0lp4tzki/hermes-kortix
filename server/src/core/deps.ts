@@ -110,3 +110,22 @@ export function maintenanceScope(
   }
   return out;
 }
+
+export type BulkDirection = 'selection_depends_on_target' | 'target_depends_on_selection';
+
+/**
+ * Edges for a batch operation between many selected resources and one target.
+ * Skips the target itself (no self-loop) and duplicates in the selection.
+ */
+export function planBulkEdges(selection: string[], target: string, direction: BulkDirection): { edges: Array<{ from: string; to: string }>; skipped: string[] } {
+  const seen = new Set<string>();
+  const edges: Array<{ from: string; to: string }> = [];
+  const skipped: string[] = [];
+  for (const id of selection) {
+    if (id === target) { skipped.push(id); continue; }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    edges.push(direction === 'selection_depends_on_target' ? { from: id, to: target } : { from: target, to: id });
+  }
+  return { edges, skipped };
+}
