@@ -7,6 +7,7 @@ import discoveryRoutes from './discovery.js';
 import checkRoutes from './checks.js';
 import alertingRoutes from './alerting.js';
 import overviewRoutes from './overview.js';
+import suggestionRoutes from './suggestions.js';
 import platformRoutes, { navCountsRoute } from './platform.js';
 
 export const routeModules: Array<(app: FastifyInstance) => Promise<void>> = [
@@ -19,5 +20,6 @@ export const routeModules: Array<(app: FastifyInstance) => Promise<void>> = [
   checkRoutes,
   alertingRoutes,
   overviewRoutes,
+  suggestionRoutes,
   navCountsRoute,
 ];

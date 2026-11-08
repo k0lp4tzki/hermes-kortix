@@ -6,6 +6,8 @@ import type { DiscoveredItem, DiscoveryRule } from '../../core/types.js';
 import { acceptItem, syncAutoStructure } from '../../discovery/accept.js';
 import { audit, HttpError, requireRole } from '../auth.js';
 import { notFound, parse } from '../util.js';
+import { testVsphere } from '../../discovery/vmware.js';
+import { unseal } from '../../lib/crypto.js';
 
 const ruleBody = z.object({
   name: z.string().min(1).max(200),
@@ -29,7 +31,7 @@ const ruleBody = z.object({
 
 const sourceBody = z.object({
   name: z.string().min(1).max(100),
-  type: z.enum(['docker', 'host', 'network']),
+  type: z.enum(['docker', 'host', 'network', 'vmware']),
   config: z.record(z.any()).default({}),
   enabled: z.boolean().default(true),
   interval_s: z.number().int().min(10).max(86400 * 7).default(60),
@@ -38,6 +40,11 @@ const sourceBody = z.object({
 
 function validateSourceConfig(type: string, cfg: Record<string, any>) {
   if (type === 'docker' && cfg.endpoint && !/^(unix:\/\/\/|tcp:\/\/|https?:\/\/)/.test(cfg.endpoint)) throw new HttpError(400, 'Docker-Endpunkt muss mit unix:///, tcp:// oder https:// beginnen');
+  if (type === 'vmware') {
+    if (!cfg.url || !/^(https?:\/\/)?[a-zA-Z0-9.\-:\[\]]+(\/.*)?$/.test(cfg.url)) throw new HttpError(400, 'Adresse des ESXi/vCenter fehlt oder ist ungültig');
+    if (!cfg.username) throw new HttpError(400, 'Benutzer fehlt');
+    if (!cfg.secret_id) throw new HttpError(400, 'Zugangsdaten (Passwort) wählen');
+  }
   if (type === 'network') {
     for (const c of cfg.cidrs ?? []) expandCidrSafe(c);
     if (cfg.ports && (!Array.isArray(cfg.ports) || cfg.ports.some((p: unknown) => !Number.isInteger(p) || (p as number) < 1 || (p as number) > 65535))) throw new HttpError(400, 'Ports müssen ganze Zahlen 1–65535 sein');
@@ -89,6 +96,20 @@ export default async function discoveryRoutes(app: FastifyInstance) {
     if (!s) throw new HttpError(400, 'Quelle nicht gefunden oder systemeigen (nur deaktivierbar)');
     await audit(req, 'discovery.source_deleted', s.name);
     return { ok: true };
+  });
+
+  /** Connection test for a VMware source (draft config, nothing is stored). */
+  app.post('/api/discovery/vmware/test', async (req) => {
+    requireRole(req, 'operator');
+    const b = parse(z.object({ url: z.string().min(1), username: z.string().min(1), secret_id: z.string().uuid(), allow_untrusted: z.boolean().default(true) }), req.body);
+    const s = await q1(`SELECT ciphertext, iv, auth_tag FROM secrets WHERE id = $1`, [b.secret_id]);
+    if (!s) notFound('Zugangsdaten');
+    try {
+      return await testVsphere(b, unseal({ ciphertext: s.ciphertext, iv: s.iv, authTag: s.auth_tag }));
+    } catch (e) {
+      const err = e as any;
+      return { ok: false, error: `${err.cause?.code ?? err.code ?? ''} ${err.cause?.message ?? err.message}`.trim() };
+    }
   });
 
   app.post('/api/discovery/sources/:id/run', async (req) => {
@@ -217,6 +238,7 @@ export default async function discoveryRoutes(app: FastifyInstance) {
     { type: 'docker', label: 'Docker Engine', description: 'Container, Compose-Projekte und Services über den Docker-Socket oder eine entfernte Docker-API (tcp://host:2375).' },
     { type: 'host', label: 'Lokaler Linux-Host', description: 'Der Host, auf dem Hermes läuft, über read-only gemountete /proc, /sys und / (inkl. aktiver systemd-Dienste, falls /run gemountet ist).' },
     { type: 'network', label: 'Netzwerkbereich', description: 'TCP-Port-Scan über konfigurierte IPv4-Bereiche (max. 1024 Adressen je Bereich).' },
+    { type: 'vmware', label: 'VMware ESXi / vCenter', description: 'Hypervisor-Hosts und VMs über die vSphere-API (nur lesender Benutzer genügt). VMs werden ihrem Host zugeordnet (läuft auf), inkl. Gast-IPs und Datastores.' },
     { type: 'podman', label: 'Podman', unavailable: 'Adapter-Schnittstelle vorhanden, Implementierung folgt (Podman-Socket ist Docker-API-kompatibel: als Docker-Quelle mit unix:///run/podman/podman.sock nutzbar).' },
     { type: 'snmp', label: 'SNMP-Netzwerkgeräte', unavailable: 'nicht in v1 – Geräte manuell im Inventar anlegen' },
     { type: 'windows', label: 'Windows-Hosts', unavailable: 'nicht in v1' },

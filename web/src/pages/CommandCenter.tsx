@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post } from '../lib/api';
 import { ago, dur, fmt, ts } from '../lib/format';
@@ -11,6 +11,7 @@ import { Topology, KIND_CODE } from '../components/Topology';
 import { EventFeed } from '../components/EventFeed';
 import { IncidentDetail, MaintenanceDialog } from './Alerts';
 import { DependencyDialog } from '../components/DependencyDialog';
+import { useSuggestions, Walkthrough } from '../components/Suggestions';
 
 const INFRA_KINDS = ['wan', 'router', 'firewall', 'switch', 'access_point', 'nas', 'hypervisor', 'vm', 'dns', 'dhcp', 'proxy', 'storage', 'external_api', 'service', 'database', 'network'];
 
@@ -32,6 +33,14 @@ export default function CommandCenter() {
   const [incident, setIncident] = useState<string | null>(null);
   const [addInfra, setAddInfra] = useState(false);
   const [newDep, setNewDep] = useState<{ from_id: string; to_id: string } | null>(null);
+  const suggestions = useSuggestions();
+  const [walk, setWalk] = useState<any[] | null>(null);
+  const [walkIdx, setWalkIdx] = useState(0);
+  const current = walk?.[walkIdx];
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get('walkthrough') && suggestions.data?.length && !walk) { setWalk(suggestions.data); setWalkIdx(0); setParams({}, { replace: true }); }
+  }, [params, suggestions.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const [now, setNow] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
 
@@ -96,16 +105,19 @@ export default function CommandCenter() {
         {(host || group || status || kind || problems || search || hideUnmonitored) && <button className="ghost sm" onClick={() => { setHost(''); setGroup(''); setStatus(''); setKind(''); setProblems(false); setSearch(''); setHideUnmonitored(false); }}>zurücksetzen</button>}
         <div className="spacer" />
         <div className="search"><Icon name="search" /><input placeholder="Knoten suchen" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 200 }} /></div>
+        {can('operator') && (suggestions.data?.length ?? 0) > 0 && !walk && <button onClick={() => { setWalk(suggestions.data!); setWalkIdx(0); setSelected(null); }} title="Vorgeschlagene Abhängigkeiten Schritt für Schritt prüfen">
+          <Icon name="share" />Abhängigkeiten prüfen ({suggestions.data!.length})</button>}
         {can('operator') && <button onClick={() => setAddInfra(true)}><Icon name="plus" />Infrastruktur</button>}
       </div>
       <div className="cc-body">
         <div className="cc-map">
           {graph.isLoading ? <Empty>Lade Topologie…</Empty> : nodes.length === 0 ? <Empty>Noch keine Ressourcen. Die Discovery füllt die Karte, sobald sie den ersten Lauf beendet hat.</Empty>
-            : <Topology data={graph.data} filter={filter} selectedId={sel?.id} onSelect={setSelected}
+            : <Topology data={graph.data} filter={current ? undefined : filter} selectedId={sel?.id} onSelect={setSelected} proposed={current ? { from: current.from_id, to: current.to_id } : null}
                 onConnect={can('operator') ? (from, to) => setNewDep({ from_id: from, to_id: to }) : undefined} />}
           <Legend />
         </div>
         <aside className="cc-rail">
+          {walk && <Walkthrough list={walk} index={walkIdx} setIndex={setWalkIdx} onClose={() => setWalk(null)} />}
           {sel ? <NodeCard n={sel} nodes={nodes} edges={edges} onClose={() => setSelected(null)} onIncident={setIncident} /> : null}
           <section>
             <h3>Aktive Störungen <span className="dim">({incidents.data?.length ?? 0})</span></h3>

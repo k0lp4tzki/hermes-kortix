@@ -35,7 +35,8 @@ export async function navCountsRoute(app: FastifyInstance) {
   app.get('/api/nav-counts', async () => {
     const r = await q1(`SELECT
       (SELECT count(*)::int FROM discovery_candidates WHERE status = 'pending') AS discovery,
-      (SELECT count(*)::int FROM incidents WHERE status = 'open') AS incidents`).catch(() => ({}));
+      (SELECT count(*)::int FROM incidents WHERE status = 'open') AS incidents,
+      (SELECT count(*)::int FROM dependency_suggestions WHERE status = 'pending') AS suggestions`).catch(() => ({}));
     return r ?? {};
   });
 }

@@ -54,6 +54,15 @@ Alles löschen: `docker compose down -v`.
    ihres Anbieters (oder umgekehrt), danach Art/Stärke/VLAN im Dialog bestätigen; oder per Dialog anlegen (Anwendung → Datenbank,
    Proxy → Backend, Dienst → DNS, Backup → Quelle/Storage, Anwendung → externe API …).
    Container → Host und `docker compose depends_on` werden automatisch erkannt.
+   **Abhängigkeitsvorschläge**: Hermes analysiert jede Minute echte Hinweise und schlägt Kanten
+   vor (Abhängigkeiten → Vorschläge, oder im Command Center „Abhängigkeiten prüfen“ als
+   Schritt-für-Schritt-Walkthrough mit Hervorhebung im Graphen). Quellen und Sicherheit:
+   VMware-API (sicher: VM läuft auf ESXi-Host, Host/VM nutzt NFS-Datastore), beobachtete
+   TCP-Verbindungen der Container und des Hosts (beobachtet: App → Datenbank/Cache/Broker,
+   auch über veröffentlichte Ports), Routing-Tabelle und Resolver des Hosts (beobachtet:
+   Gateway, DNS), gleiches Subnetz wie das Gateway (Vermutung). Ziele, die noch nicht im
+   Inventar sind, werden beim Übernehmen mit Ping/TCP-Checks angelegt. Nichts wird ohne
+   Bestätigung eingetragen; abgelehnte Vorschläge kommen nicht wieder.
 6. **Benachrichtigungen**: Webhook-Kanal anlegen (Test senden), Routing-Regel anlegen. Ohne
    Routing-Regel wird nichts versendet.
 7. **Alarme**: offene/behobene Störungen mit Ursache, Betroffenen, Verlauf, Häufigkeit;
@@ -116,6 +125,15 @@ Container-Konfigurationen inkl. Umgebungsvariablen). Hermes ruft nur lesende API
 Wer das nicht möchte, entfernt den Mount oder nutzt einen Socket-Proxy (z. B. Tecnativa
 docker-socket-proxy mit `CONTAINERS=1, INFO=1`) und trägt ihn als Docker-Quelle `tcp://…` ein.
 
+### VMware ESXi / vCenter
+
+Discovery → Quellen → „Quelle anlegen“, Typ **VMware ESXi / vCenter**, je ESXi-Host eine Quelle
+(bei vCenter genügt eine). Auf dem Host einen Benutzer mit der Rolle **„Nur Lesen“** anlegen, sein
+Passwort unter Einstellungen → Zugangsdaten speichern und in der Quelle auswählen; „Verbindung
+testen“ prüft Login und zählt Hosts und VMs. Hosts erscheinen als Virtualisierungshosts, VMs (mit
+Gast-IPs, sofern VMware Tools laufen) als deren Kinder in der Discovery-Inbox. Wird eine VM auf
+einen anderen Host verschoben, folgt die Zuordnung automatisch.
+
 ### Weitere Docker-Hosts
 
 Discovery → Quellen → „Quelle anlegen“, Typ Docker, Endpunkt `tcp://<host>:2375` (oder über einen
@@ -165,6 +183,10 @@ pnpm typecheck
 
 ## Grenzen von v1
 
+- VMware-Anbindung (vSphere-SOAP-API) ist gegen einen nachgebauten ESXi-Endpunkt getestet, noch
+  nicht gegen einen echten Host. Gast-IPs liefert vSphere nur bei laufenden VMware Tools.
+- Verbindungs-Vorschläge sehen nur Container auf dem lokalen Docker-Host und den Host selbst,
+  und nur Verbindungen, die zum Zeitpunkt der Analyse (jede Minute) offen sind.
 - Agentenlos: Host-Metriken nur für den Host, auf dem der Worker läuft; keine Windows-Agenten,
   kein SNMP, keine physische L2/VLAN-Erkennung (Netzwerke/VLANs als manuelle Attribute).
 - Benachrichtigungskanal: generischer JSON-Webhook (ntfy, Gotify, Home Assistant, n8n,

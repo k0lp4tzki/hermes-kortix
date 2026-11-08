@@ -226,7 +226,7 @@ function Sources() {
           <tbody>{(sources.data ?? []).map((s) => (
             <tr key={s.id} style={{ opacity: s.enabled ? 1 : 0.55 }}>
               <td style={{ fontWeight: 500 }}>{s.name}</td><td>{s.type}</td>
-              <td className="mono dim" style={{ fontSize: 11.5 }}>{s.type === 'docker' ? s.config.endpoint : s.type === 'network' ? (s.config.cidrs?.join(', ') || 'keine Bereiche') : s.config.systemd === false ? 'ohne systemd' : '/proc, /sys, systemd'}</td>
+              <td className="mono dim" style={{ fontSize: 11.5 }}>{s.type === 'vmware' ? `${s.config.username}@${s.config.url}` : s.type === 'docker' ? s.config.endpoint : s.type === 'network' ? (s.config.cidrs?.join(', ') || 'keine Bereiche') : s.config.systemd === false ? 'ohne systemd' : '/proc, /sys, systemd'}</td>
               <td className="num">{dur(s.interval_s)}</td>
               <td className="dim">{s.last_run_at ? `${ago(s.last_run_at)} (${s.last_duration_ms} ms)` : 'noch nie'}</td>
               <td className="num">{s.last_item_count ?? '–'} <span className="dim">/ {s.resource_count} übern. / {s.pending_count} offen</span></td>
@@ -274,8 +274,8 @@ function SourceEditor({ source, onClose }: { source: any; onClose: () => void })
     <Modal title={s.id ? `Quelle ${s.name}` : 'Quelle anlegen'} onClose={onClose} footer={<><button onClick={onClose}>Abbrechen</button><button className="primary" disabled={!s.name} onClick={() => save.mutate()}>Speichern</button></>}>
       <div className="form-grid">
         <Field label="Name"><input value={s.name} onChange={(e) => setS({ ...s, name: e.target.value })} /></Field>
-        <Field label="Typ"><select value={s.type} disabled={!!s.id} onChange={(e) => setS({ ...s, type: e.target.value, config: e.target.value === 'network' ? { cidrs: [], ports: [], exclude: [], timeout_ms: 400 } : e.target.value === 'docker' ? { endpoint: 'tcp://', include_stopped: true } : { systemd: true } })}>
-          <option value="docker">Docker Engine</option><option value="network">Netzwerkbereich</option><option value="host">Lokaler Host</option></select></Field>
+        <Field label="Typ"><select value={s.type} disabled={!!s.id} onChange={(e) => setS({ ...s, type: e.target.value, interval_s: e.target.value === 'vmware' ? 300 : s.interval_s, config: e.target.value === 'network' ? { cidrs: [], ports: [], exclude: [], timeout_ms: 400 } : e.target.value === 'docker' ? { endpoint: 'tcp://', include_stopped: true } : e.target.value === 'vmware' ? { url: '', username: '', secret_id: '', allow_untrusted: true } : { systemd: true } })}>
+          <option value="docker">Docker Engine</option><option value="vmware">VMware ESXi / vCenter</option><option value="network">Netzwerkbereich</option><option value="host">Lokaler Host</option></select></Field>
         <Field label="Intervall (Sekunden)"><input type="number" min={10} value={s.interval_s} onChange={(e) => setS({ ...s, interval_s: e.target.value })} /></Field>
         <Field label="Verwaist nach (Sekunden)" hint="So lange fehlend, dann als verwaist markiert"><input type="number" value={s.orphan_after_s} onChange={(e) => setS({ ...s, orphan_after_s: e.target.value })} /></Field>
         {s.type === 'docker' && <>
@@ -289,9 +289,27 @@ function SourceEditor({ source, onClose }: { source: any; onClose: () => void })
           <Field label="Ports" hint="leer = Standardliste (22, 53, 80, 443, …)"><input value={list.ports} onChange={(e) => setList({ ...list, ports: e.target.value })} /></Field>
           <Field label="Timeout je Port (ms)"><input type="number" value={s.config.timeout_ms ?? 400} onChange={(e) => c('timeout_ms', Number(e.target.value))} /></Field>
         </>}
+        {s.type === 'vmware' && <VmwareFields cfg={s.config} set={c} />}
         {s.type === 'host' && <label className="check span2"><input type="checkbox" checked={s.config.systemd !== false} onChange={(e) => c('systemd', e.target.checked)} />Aktive systemd-Dienste erkennen (über /run/systemd/units des Hosts)</label>}
         <label className="check"><input type="checkbox" checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} />Quelle aktiv</label>
       </div>
     </Modal>
   );
+}
+
+function VmwareFields({ cfg, set }: { cfg: any; set: (k: string, v: any) => void }) {
+  const toast = useToast();
+  const secrets = useQuery({ queryKey: ['secrets'], queryFn: () => get<any[]>('/secrets').catch(() => []) });
+  const [result, setResult] = useState<any>(null);
+  const test = useMutation({ mutationFn: () => post('/discovery/vmware/test', { url: cfg.url, username: cfg.username, secret_id: cfg.secret_id, allow_untrusted: cfg.allow_untrusted !== false }),
+    onSuccess: (r: any) => setResult(r), onError: (e: Error) => toast(e.message, true) });
+  return <>
+    <Field className="span2" label="Adresse des ESXi-Hosts oder vCenter" hint="z. B. https://10.1.1.254 – je ESXi-Host eine Quelle anlegen"><input value={cfg.url ?? ''} onChange={(e) => set('url', e.target.value)} placeholder="https://10.1.1.254" /></Field>
+    <Field label="Benutzer" hint="Rolle „Nur Lesen“ genügt"><input value={cfg.username ?? ''} onChange={(e) => set('username', e.target.value)} placeholder="hermes-ro" /></Field>
+    <Field label="Passwort aus Zugangsdaten" hint="Einstellungen → Zugangsdaten"><select value={cfg.secret_id ?? ''} onChange={(e) => set('secret_id', e.target.value)}>
+      <option value="">wählen…</option>{(secrets.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>
+    <label className="check"><input type="checkbox" checked={cfg.allow_untrusted !== false} onChange={(e) => set('allow_untrusted', e.target.checked)} />Selbstsigniertes Zertifikat akzeptieren</label>
+    <div className="row"><button className="sm" disabled={!cfg.url || !cfg.username || !cfg.secret_id || test.isPending} onClick={() => test.mutate()}>{test.isPending ? 'Teste…' : 'Verbindung testen'}</button>
+      {result && (result.ok ? <span style={{ color: 'var(--ok)', fontSize: 12.5 }}>{result.product}: {result.hosts} Host(s), {result.vms} VM(s)</span> : <span className="err" style={{ fontSize: 12.5 }}>{result.error}</span>)}</div>
+  </>;
 }

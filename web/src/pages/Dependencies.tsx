@@ -7,12 +7,16 @@ import { DEP_TYPES, KIND_LABEL } from '../lib/meta';
 import { Badge, Empty, Icon, StatusBadge, useToast } from '../components/ui';
 import { Topology } from '../components/Topology';
 import { DependencyDialog } from '../components/DependencyDialog';
+import { SuggestionList, useSuggestions } from '../components/Suggestions';
+import { useNavigate } from 'react-router-dom';
 
 export default function Dependencies() {
   const qc = useQueryClient();
   const toast = useToast();
   const { can } = useAuth();
-  const [tab, setTab] = useState<'graph' | 'list'>('graph');
+  const [tab, setTab] = useState<'graph' | 'list' | 'suggest'>('graph');
+  const sugg = useSuggestions();
+  const nav = useNavigate();
   const [dialog, setDialog] = useState<any | null>(null);
   const [selected, setSelected] = useState<any | null>(null);
   const [search, setSearch] = useState('');
@@ -34,13 +38,14 @@ export default function Dependencies() {
         <div className="actions">{can('operator') && <button className="primary" onClick={() => setDialog({})}><Icon name="plus" />Abhängigkeit anlegen</button>}</div>
       </div>
       <div className="toolbar">
-        <div className="tabs"><button className={`tab ${tab === 'graph' ? 'active' : ''}`} onClick={() => setTab('graph')}>Graph</button><button className={`tab ${tab === 'list' ? 'active' : ''}`} onClick={() => setTab('list')}>Liste<span className="n">{deps.data?.filter((d) => !d.suppressed).length ?? 0}</span></button></div>
+        <div className="tabs"><button className={`tab ${tab === 'graph' ? 'active' : ''}`} onClick={() => setTab('graph')}>Graph</button><button className={`tab ${tab === 'list' ? 'active' : ''}`} onClick={() => setTab('list')}>Liste<span className="n">{deps.data?.filter((d) => !d.suppressed).length ?? 0}</span></button>
+          <button className={`tab ${tab === 'suggest' ? 'active' : ''}`} onClick={() => setTab('suggest')}>Vorschläge<span className="n">{sugg.data?.length ?? 0}</span></button></div>
         {tab === 'graph' && can('operator') && <span className="sub">Verbinden: vom oberen Punkt „Abhängig von“ zum unteren Punkt „Sind abhängig von dieser Ressource“ des Anbieters ziehen (oder umgekehrt).</span>}
         <div className="spacer" />
         {tab === 'list' && <label className="check"><input type="checkbox" checked={showSuppressed} onChange={(e) => setShowSuppressed(e.target.checked)} />entfernte automatische anzeigen</label>}
         <div className="search"><Icon name="search" /><input placeholder="Komponente suchen" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
       </div>
-      {tab === 'graph' ? (
+      {tab === 'suggest' ? <SuggestionList onWalkthrough={() => nav('/?walkthrough=1')} /> : tab === 'graph' ? (
         <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 340px' : '1fr', gap: 12 }}>
           <div className="panel flush" style={{ height: 'calc(100vh - 200px)', overflow: 'hidden' }}>
             {graph.data ? <Topology data={graph.data} filter={filter} selectedId={selected?.id} onSelect={setSelected}

@@ -7,7 +7,7 @@ import { tx } from '../../db/pool.js';
 import { audit, HttpError, requireRole } from '../auth.js';
 import { notFound, parse } from '../util.js';
 
-const DEP_TYPES = ['runs_on', 'depends_on', 'uses_db', 'uses_cache', 'uses_broker', 'proxied_by', 'resolves_via', 'backup_source', 'backup_storage', 'consumes_api', 'network_link', 'powered_by', 'other'] as const;
+const DEP_TYPES = ['runs_on', 'depends_on', 'uses_db', 'uses_cache', 'uses_broker', 'proxied_by', 'resolves_via', 'backup_source', 'backup_storage', 'consumes_api', 'network_link', 'powered_by', 'uses_storage', 'other'] as const;
 const depBody = z.object({
   from_id: z.string().uuid(), to_id: z.string().uuid(), type: z.enum(DEP_TYPES), strength: z.enum(['hard', 'soft']).default('hard'),
   attributes: z.object({ network: z.string().max(100).optional(), subnet: z.string().max(60).optional(), vlan: z.string().max(20).optional(), port: z.string().max(40).optional(), label: z.string().max(100).optional() }).partial().default({}),

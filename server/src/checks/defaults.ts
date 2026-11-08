@@ -16,6 +16,10 @@ export function templatesFor(item: Pick<DiscoveredItem, 'kind' | 'attributes' | 
     case 'host':
       // the machine Hermes runs on (found via /proc or the local docker socket) gets host metrics
       return a.procfs || String(a.docker_endpoint ?? '').startsWith('unix://') ? [{ type: 'host', name: 'Host-Ressourcen' }] : [{ type: 'ping', name: 'Ping' }];
+    case 'hypervisor':
+      return [{ type: 'ping', name: 'Ping (Management)' }, { type: 'tls', name: 'Management-Zertifikat', config: { port: 443, allow_untrusted: true } }];
+    case 'vm':
+      return item.connection?.host ? [{ type: 'ping', name: 'Ping' }] : [];
     case 'systemd_service':
       return [{ type: 'systemd_unit', name: 'Dienst aktiv', config: { unit: a.unit } }];
     case 'endpoint': {
