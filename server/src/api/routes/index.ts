@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import authRoutes from './auth.js';
 import userRoutes from './users.js';
 import secretRoutes from './secrets.js';
+import resourceRoutes from './resources.js';
+import discoveryRoutes from './discovery.js';
 import platformRoutes, { navCountsRoute } from './platform.js';
 
 export const routeModules: Array<(app: FastifyInstance) => Promise<void>> = [
@@ -9,5 +11,7 @@ export const routeModules: Array<(app: FastifyInstance) => Promise<void>> = [
   userRoutes,
   secretRoutes,
   platformRoutes,
+  resourceRoutes,
+  discoveryRoutes,
   navCountsRoute,
 ];

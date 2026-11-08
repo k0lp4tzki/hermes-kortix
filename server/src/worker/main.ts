@@ -4,12 +4,14 @@ import { waitForDb } from '../db/pool.js';
 import { migrate } from '../db/migrate.js';
 import { startHeartbeat } from '../lib/heartbeat.js';
 import { loops, loopStats } from './loops.js';
+import { bootstrap } from './bootstrap.js';
 
 const log = logger('worker');
 
 async function main() {
   await waitForDb((m) => log.warn(m));
   await migrate();
+  await bootstrap();
   startHeartbeat('worker', () => loopStats());
   for (const l of loops) runLoop(l.name, l.everyMs, l.fn);
   log.info('worker started', { loops: loops.map((l) => l.name) });
