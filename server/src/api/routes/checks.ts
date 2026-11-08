@@ -181,7 +181,7 @@ export default async function checkRoutes(app: FastifyInstance) {
     const pick = (metric: string, kinds: string[]) => rows.filter((r) => r.metric === metric && kinds.includes(r.kind)).sort((a, b) => b.last_value - a.last_value).slice(0, 8);
     return {
       cpu: pick('cpu_percent', ['container']), memory: pick('mem_used_bytes', ['container']), net_rx: pick('net_rx_bps', ['container']), net_tx: pick('net_tx_bps', ['container']),
-      disk_write: pick('blk_write_bps', ['container']), hosts_cpu: pick('cpu_percent', ['host', 'vm', 'hypervisor']), hosts_mem: rows.filter((r) => r.metric === 'mem_used_bytes' && r.kind === 'host'),
+      disk_write: pick('blk_write_bps', ['container']), hosts_cpu: pick('cpu_percent', ['host', 'vm', 'hypervisor']), hosts_mem: rows.filter((r) => r.metric === 'mem_used_bytes' && ['host', 'vm', 'hypervisor'].includes(r.kind)),
     };
   });
 }

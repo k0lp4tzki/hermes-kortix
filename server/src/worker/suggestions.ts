@@ -1,4 +1,7 @@
 import { readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { itemMacs } from '../core/reconcile.js';
+import { isPrivate } from '../core/suggest.js';
 import { join } from 'node:path';
 import { q, q1, notify, tx } from '../db/pool.js';
 import { config } from '../lib/config.js';
@@ -45,6 +48,12 @@ export function parseTcp(tcp: string, tcp6: string): Array<{ ip: string; port: n
   return rows.filter((r) => !listeners.has(r.local) && !r.remIp.startsWith('127.')).map((r) => ({ ip: r.remIp, port: r.remPort }));
 }
 
+/** The machine Hermes runs on, whatever its kind (host, or a VM once vSphere identified it). */
+export function hermesHost(resources: any[]) {
+  return resources.find((r) => r.kind !== 'container' && r.discovered?.procfs)
+    ?? resources.find((r) => r.kind !== 'container' && String(r.discovered?.docker_endpoint ?? '').startsWith('unix://') && !r.discovered?.container_id);
+}
+
 function ipsOf(r: any): string[] {
   const d = r.discovered ?? {};
   return [...new Set([...(Array.isArray(d.ips) ? d.ips : []), d.ip, r.connection?.host].filter((x) => typeof x === 'string' && IPV4.test(x)))];
@@ -76,12 +85,46 @@ async function collectConnections(resources: any[]): Promise<ConnectionFact[]> {
     }
   }
   // processes on the host itself (host network namespace = pid 1); skip docker-proxy traffic into containers
-  const host = resources.find((r) => r.kind === 'host' && (r.discovered?.procfs || String(r.discovered?.docker_endpoint ?? '').startsWith('unix://')));
+  const host = hermesHost(resources);
   if (host) {
     const conns = parseTcp((await read(join(P, '1/net/tcp'))) ?? '', (await read(join(P, '1/net/tcp6'))) ?? '');
     for (const c of conns) if (!containerIps.has(c.ip) && !/^172\.(1[6-9]|2\d|3[01])\./.test(c.ip)) add(host.id, c.ip, c.port);
   }
   return [...counts.values()];
+}
+
+/** One ICMP probe with a TTL; returns the address that answered (router or target) or null. */
+function probeTtl(target: string, ttl: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const p = spawn('ping', ['-n', '-c', '1', '-W', '1', '-t', String(ttl), target]);
+    let out = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.on('error', () => resolve(null));
+    p.on('close', () => resolve(out.match(/From (\d+\.\d+\.\d+\.\d+)/)?.[1] ?? out.match(/bytes from (\d+\.\d+\.\d+\.\d+)/)?.[1] ?? null));
+  });
+}
+
+let traceCache: { at: number; path: string[]; wan: string | null } | null = null;
+/**
+ * Router chain from this host towards the internet (ping with rising TTL, like traceroute).
+ * Skips the worker container's own bridge gateway, keeps private hops in order, stops at the
+ * first public address (the internet side) or at the first hop that does not answer.
+ */
+export async function traceToInternet(target = process.env.HERMES_TRACE_TARGET ?? '1.1.1.1'): Promise<{ path: string[]; wan: string | null }> {
+  if (traceCache && Date.now() - traceCache.at < 10 * 60_000) return traceCache;
+  const ownGw = (((await read('/proc/self/net/route')) ?? '').split('\n').map((l) => l.trim().split(/\s+/)).find((f) => f[1] === '00000000')?.[2]);
+  const skip = ownGw ? hexToIp(ownGw) : null;
+  const path: string[] = [];
+  let wan: string | null = null;
+  for (let ttl = 1; ttl <= 10; ttl++) {
+    const hop = await probeTtl(target, ttl);
+    if (!hop) break;
+    if (hop === skip) continue;
+    if (!isPrivate(hop)) { wan = hop; break; }
+    if (!path.includes(hop)) path.push(hop);
+  }
+  traceCache = { at: Date.now(), path, wan };
+  return traceCache;
 }
 
 async function collectRoutes(host: any): Promise<RouteFact[]> {
@@ -99,7 +142,11 @@ async function collectRoutes(host: any): Promise<RouteFact[]> {
       subnets.push(`${hexToIp(dest)}/${bits}`);
     }
   }
-  return [{ hostId: host.id, gateway, subnets }];
+  let trace: { path: string[]; wan: string | null } = { path: [], wan: null };
+  try { trace = await traceToInternet(); } catch { /* ICMP not permitted */ }
+  // the traceroute only counts when it leaves through the gateway the routing table names
+  const path = gateway && trace.path[0] === gateway ? trace.path : [];
+  return [{ hostId: host.id, gateway, subnets, path, wan: path.length ? trace.wan : null }];
 }
 
 async function collectDns(host: any): Promise<DnsFact[]> {
@@ -120,7 +167,7 @@ async function collectVmware(resources: any[]): Promise<{ vms: VmFact[]; hypervi
   const vms: VmFact[] = [], hypervisors: HypervisorFact[] = [];
   for (const i of items.values()) {
     const ds = (i.attrs?.datastores ?? []).map((d: any) => ({ name: d.name, remote_host: d.remote_host ?? null }));
-    if (i.key.startsWith('vmware-vm:')) vms.push({ vmIdentity: i.key, name: i.name, ips: i.attrs?.ips ?? [], hostIdentity: i.parent, datastores: ds });
+    if (i.key.startsWith('vmware-vm:')) vms.push({ vmIdentity: i.key, name: i.name, ips: i.attrs?.ips ?? [], macs: i.attrs?.macs ?? [], guestHostname: i.attrs?.guest_hostname ?? null, hostIdentity: i.parent, datastores: ds });
     else if (i.key.startsWith('vmware-host:')) hypervisors.push({ identity: i.key, name: i.name, ips: i.attrs?.ips ?? [], gateway: i.attrs?.gateway ?? null, datastores: ds });
   }
   return { vms, hypervisors };
@@ -133,14 +180,14 @@ export async function suggestTick() {
   if (!requested && Date.now() - lastRun < 60_000) return;
   lastRun = Date.now();
   const t0 = performance.now();
-  const resources = await q(`SELECT id, COALESCE(display_name, name) AS label, kind, identity_key, parent_id, connection, discovered FROM resources`);
-  const edges = await q(`SELECT from_id AS "from", to_id AS "to", suppressed FROM dependencies`);
-  const host = resources.find((r) => r.kind === 'host' && (r.discovered?.procfs || String(r.discovered?.docker_endpoint ?? '').startsWith('unix://')));
+  const resources = await q(`SELECT id, COALESCE(display_name, name) AS label, kind, identity_key, parent_id, connection, discovered, locked_fields FROM resources`);
+  const edges = await q(`SELECT id, from_id AS "from", to_id AS "to", suppressed, strength, description FROM dependencies`);
+  const host = hermesHost(resources);
   let connections: ConnectionFact[] = [], routes: RouteFact[] = [], dns: DnsFact[] = [], vm = { vms: [] as VmFact[], hypervisors: [] as HypervisorFact[] };
   try { connections = await collectConnections(resources); } catch (e) { log.warn('connections failed', { err: errMsg(e) }); }
   try { routes = await collectRoutes(host); dns = await collectDns(host); } catch (e) { log.warn('routing/dns failed', { err: errMsg(e) }); }
   try { vm = await collectVmware(resources); } catch (e) { log.warn('vmware facts failed', { err: errMsg(e) }); }
-  const sres: SugResource[] = resources.map((r) => ({ id: r.id, label: r.label, kind: r.kind, identityKey: r.identity_key, parentId: r.parent_id, ips: ipsOf(r),
+  const sres: SugResource[] = resources.map((r) => ({ id: r.id, label: r.label, kind: r.kind, identityKey: r.identity_key, parentId: r.parent_id, ips: ipsOf(r), macs: itemMacs(r.discovered), locked: r.locked_fields ?? [],
     port: Number(r.connection?.port) || null, discovered: r.discovered ?? {} }));
   const list = suggestDependencies({ resources: sres, edges, connections, routes, dns, ...vm });
   let fresh = 0;
@@ -148,17 +195,19 @@ export async function suggestTick() {
     for (const s of list) {
       const r = await q(`INSERT INTO dependency_suggestions(key, from_id, to_id, target, type, strength, source, confidence, evidence, data)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-          ON CONFLICT (key) DO UPDATE SET last_seen_at = now(), observations = dependency_suggestions.observations + 1, evidence = $9, data = $10, confidence = $8, target = $4
+          ON CONFLICT (key) DO UPDATE SET last_seen_at = now(), observations = dependency_suggestions.observations + 1, evidence = $9, data = $10, confidence = $8, target = $4, type = $5, strength = $6
           RETURNING (xmax = 0) AS inserted, status`, [s.key, s.from, s.to, s.target, s.type, s.strength, s.source, s.confidence, s.evidence, s.data], c);
       if (r[0]?.inserted) fresh++;
     }
     // pending suggestions whose evidence vanished for a day, or that an edge now covers, go away
     await q(`DELETE FROM dependency_suggestions WHERE status = 'pending' AND last_seen_at < now() - interval '24 hours'`, [], c);
-    await q(`DELETE FROM dependency_suggestions s USING dependencies d WHERE s.status = 'pending' AND s.to_id IS NOT NULL
+    await q(`DELETE FROM dependency_suggestions s USING dependencies d WHERE s.status = 'pending' AND s.to_id IS NOT NULL AND s.type NOT IN ('remove_edge', 'same_as')
                AND ((d.from_id = s.from_id AND d.to_id = s.to_id) OR (d.from_id = s.to_id AND d.to_id = s.from_id)) AND NOT d.suppressed`, [], c);
+    // a removal suggestion whose edge is gone is done
+    await q(`DELETE FROM dependency_suggestions s WHERE s.status = 'pending' AND s.type = 'remove_edge' AND NOT EXISTS (SELECT 1 FROM dependencies d WHERE d.id::text = s.data->>'dependency_id' AND NOT d.suppressed)`, [], c);
   });
   if (fresh || requested) await notify('suggestions');
   setStat('suggest_ms', Math.round(performance.now() - t0));
-  setStat('suggest_facts', { connections: connections.length, routes: routes.length, dns: dns.length, vms: vm.vms.length, hypervisors: vm.hypervisors.length });
+  setStat('suggest_facts', { connections: connections.length, routes: routes.length, trace: routes[0]?.path ?? [], wan: routes[0]?.wan ?? null, dns: dns.length, vms: vm.vms.length, hypervisors: vm.hypervisors.length });
   if (fresh) log.info('new dependency suggestions', { fresh, total: list.length });
 }

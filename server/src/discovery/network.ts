@@ -1,10 +1,46 @@
 import { Socket } from 'node:net';
 import { reverse } from 'node:dns/promises';
-import type { DiscoveredItem } from '../core/types.js';
+import type { DiscoveredItem, ResourceKind } from '../core/types.js';
 import type { DiscoveryAdapter } from './adapter.js';
 import { expandCidr, inCidr } from '../core/rules.js';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { config } from '../lib/config.js';
 
-export const DEFAULT_SCAN_PORTS = [22, 53, 80, 443, 445, 3000, 3306, 5432, 6379, 8006, 8080, 8443, 9000, 9090];
+const hexIp = (h: string) => { const n = parseInt(h, 16); return [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255].join('.'); };
+
+/** ARP/neighbour table of the host network namespace: IPv4 → MAC (only complete entries). */
+export async function hostArp(): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const t = await readFile(join(config.hostProc, '1/net/arp'), 'utf8').catch(() => '');
+  for (const line of t.split('\n').slice(1)) {
+    const f = line.trim().split(/\s+/);
+    if (f.length >= 6 && f[2] === '0x2' && f[3] !== '00:00:00:00:00:00') out.set(f[0], f[3].toLowerCase());
+  }
+  return out;
+}
+
+/** Default gateway of the host network namespace. */
+export async function hostDefaultGateway(): Promise<string | null> {
+  const t = await readFile(join(config.hostProc, '1/net/route'), 'utf8').catch(() => '');
+  for (const line of t.split('\n').slice(1)) {
+    const f = line.trim().split(/\s+/);
+    if (f[1] === '00000000' && f[2] && f[2] !== '00000000') return hexIp(f[2]);
+  }
+  return null;
+}
+
+/** Kind from hard evidence only; everything else stays a generic endpoint for a person to classify. */
+export function classifyEndpoint(ip: string, open: number[], gateway: string | null): ResourceKind {
+  if (ip === gateway) return 'router';
+  if (open.includes(902)) return 'hypervisor'; // VMware ESXi host agent
+  if (open.includes(8006)) return 'hypervisor'; // Proxmox VE
+  if (open.includes(5000) && open.includes(5001)) return 'nas'; // Synology DSM
+  if (open.includes(53) && open.length <= 3) return 'dns';
+  return 'endpoint';
+}
+
+export const DEFAULT_SCAN_PORTS = [22, 53, 80, 443, 445, 902, 3000, 3306, 5000, 5001, 5432, 6379, 8006, 8080, 8443, 9000, 9090];
 
 function probe(host: string, port: number, timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -50,13 +86,20 @@ export const networkAdapter: DiscoveryAdapter = {
       return { ip, open };
     });
     const items: DiscoveredItem[] = [];
+    // the probes above filled the ARP table for everything on the local segment
+    const arp = await hostArp();
+    const gateway = await hostDefaultGateway();
     for (const r of results) {
       if (!r.open.length) continue;
       let rdns: string | null = null;
       try { rdns = (await reverse(r.ip))[0] ?? null; } catch { /* no PTR */ }
+      // systemd-resolved answers "_gateway" for the current default gateway: not a device name
+      if (rdns && /^_(gateway|outbound)(\.|$)/.test(rdns)) rdns = null;
+      const mac = arp.get(r.ip);
+      const kind = classifyEndpoint(r.ip, r.open, gateway);
       items.push({
-        identityKey: `net:${r.ip}`, kind: 'endpoint', name: rdns ?? r.ip, running: true,
-        attributes: { ip: r.ip, ips: [r.ip], open_ports: r.open, rdns },
+        identityKey: `net:${r.ip}`, kind, name: rdns ?? (kind === 'router' ? `Gateway ${r.ip}` : r.ip), running: true,
+        attributes: { ip: r.ip, ips: [r.ip], open_ports: r.open, rdns, macs: mac ? [mac] : [], is_default_gateway: r.ip === gateway },
         connection: { host: r.ip },
       });
     }

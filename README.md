@@ -57,19 +57,24 @@ Alles löschen: `docker compose down -v`.
    **Ebenen im Graphen**: Command Center und Abhängigkeitsgraph ordnen jede Komponente einer festen,
    benannten Ebene zu – von oben nach unten: Internet & externe Dienste, Netzwerk (Router, Firewall,
    Switch, DNS), Hosts & Hypervisoren, Virtuelle Maschinen, Container & Dienste, Storage (NAS) als Basis.
-   **Gleiches Gerät**: Ein neuer Fund mit einer IP-Adresse, die schon ein Eintrag im Inventar hat, wird
+   Funde ohne bekannten Typ landen in der Ebene „Nicht zugeordnet“. Der Netzwerk-Scan ordnet nur bei
+   harten Belegen ein: Default-Gateway → Router, Port 902 → ESXi, 8006 → Proxmox, 5000+5001 → NAS.
+   **Gleiches Gerät**: Ein neuer Fund mit einer MAC- oder IP-Adresse, die schon ein Eintrag im Inventar hat, wird
    diesem Eintrag zugeordnet statt doppelt angelegt (z. B. VM „app01“ → vorhandener „Server 10.1.1.155“,
    der dabei zum VM-Typ wird). Bereits doppelte Einträge mit gleicher IP schlägt Hermes zum
    Zusammenführen vor, nie als Abhängigkeit.
    **Abhängigkeitsvorschläge**: Hermes analysiert jede Minute echte Hinweise und schlägt Kanten
    vor (Abhängigkeiten → Vorschläge, oder im Command Center „Abhängigkeiten prüfen“ als
    Schritt-für-Schritt-Walkthrough mit Hervorhebung im Graphen). Quellen und Sicherheit:
+   gleiche MAC/IP (sicher, Zusammenführen; die MAC kennt vSphere auch ohne VMware Tools), gleicher
+   Hostname (Vermutung), Routing-Tabelle und Traceroute des Hermes-Hosts (Kette Gateway → weitere
+   Router → Internet; VMs hängen nicht direkt am Gateway, sondern über ihren ESX-Host),
    VMware-API (sicher: VM läuft auf ESXi-Host, VM nutzt Storage, wenn ihre Platten auf einem
    NFS-Datastore liegen, ESXi-Host → sein Default-Gateway; der Datastore-Mount des Hosts selbst ist
    keine Abhängigkeit), beobachtete
    TCP-Verbindungen der Container und des Hosts (beobachtet: App → Datenbank/Cache/Broker,
    auch über veröffentlichte Ports), Routing-Tabelle und Resolver des Hosts (beobachtet:
-   Gateway, DNS), gleiches Subnetz wie das Gateway (Vermutung; nicht für Storage und VMs). Ziele, die noch nicht im
+   Gateway, DNS). Geräte im selben Subnetz werden nicht ans Gateway gehängt (sie reden direkt miteinander). Ziele, die noch nicht im
    Inventar sind, werden beim Übernehmen mit Ping/TCP-Checks angelegt. Nichts wird ohne
    Bestätigung eingetragen; abgelehnte Vorschläge kommen nicht wieder.
 6. **Benachrichtigungen**: Webhook-Kanal anlegen (Test senden), Routing-Regel anlegen. Ohne

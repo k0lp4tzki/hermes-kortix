@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { notify, pool, q, q1, tx } from '../../db/pool.js';
-import { findDuplicates, itemIps } from '../../core/reconcile.js';
+import { findDuplicates, itemIps, itemMacs } from '../../core/reconcile.js';
 import { RESOURCE_KINDS } from '../../core/types.js';
 import { audit, HttpError, requireRole } from '../auth.js';
 import { notFound, parse } from '../util.js';
@@ -45,7 +45,7 @@ export default async function resourceRoutes(app: FastifyInstance) {
     const rows = await q(`SELECT id, name, COALESCE(display_name, name) AS label, kind, origin, connection->>'host' AS host, connection->>'port' AS port,
       discovered->>'container_id' AS container_id, connection->>'url' AS url, discovered, connection FROM resources`);
     const dismissed = new Set<string>(((await q1(`SELECT value FROM settings WHERE key = 'dismissed_duplicates'`))?.value ?? []) as string[]);
-    const groups = findDuplicates(rows.map((r) => ({ id: r.id, name: r.label, kind: r.kind, containerId: r.container_id, ips: itemIps(r.discovered, r.connection), address: r.url ?? (r.host && r.port ? `${r.host}:${r.port}` : null) })))
+    const groups = findDuplicates(rows.map((r) => ({ id: r.id, name: r.label, kind: r.kind, containerId: r.container_id, ips: itemIps(r.discovered, r.connection), macs: itemMacs(r.discovered), address: r.url ?? (r.host && r.port ? `${r.host}:${r.port}` : null) })))
       .filter((g) => !dismissed.has([...g.ids].sort().join(',')));
     const byId = new Map(rows.map((r) => [r.id, r]));
     return groups.map((g) => ({ ...g, key: [...g.ids].sort().join(','), resources: g.ids.map((id) => { const { discovered, connection, ...r } = byId.get(id); void discovered; void connection; return r; }) }));

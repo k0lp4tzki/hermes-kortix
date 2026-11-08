@@ -50,20 +50,41 @@ describe('dependency suggestions', () => {
     expect(s.some((x) => x.target?.host === '140.82.121.3')).toBe(false); // unknown public IPs are not suggested
   });
 
-  it('routing and DNS: gateway and resolver, plus subnet neighbours as hints', () => {
+  it('routing: host → gateway → next router (traceroute) → internet; no subnet guessing; gateway endpoint becomes a router', () => {
     const s = suggestDependencies({ ...base,
-      resources: [r('host', 'host', ['10.1.1.10']), r('gw', 'router', ['10.1.1.1']), r('nas', 'nas', ['10.1.1.20']), r('pi', 'endpoint', ['10.1.1.30']), r('far', 'host', ['10.9.9.9'])],
-      routes: [{ hostId: 'host', gateway: '10.1.1.1', subnets: ['10.1.1.0/24'] }],
-      dns: [{ hostId: 'host', nameservers: ['10.1.1.53'] }] });
-    expect(s.find((x) => x.from === 'host' && x.to === 'gw')).toMatchObject({ confidence: 'evidence', type: 'network_link' });
-    expect(s.find((x) => x.from === 'pi' && x.to === 'gw')).toMatchObject({ confidence: 'hint' });
-    expect(s.some((x) => x.from === 'nas')).toBe(false); // storage is the base layer
-    expect(s.some((x) => x.from === 'far')).toBe(false);
+      resources: [r('aico', 'host', ['10.1.1.20']), r('gw', 'endpoint', ['10.1.1.10'], { label: '_gateway' }), r('fritz', 'endpoint', ['192.168.178.1']), r('nas', 'nas', ['10.1.1.30']), r('pi', 'endpoint', ['10.1.1.31'])],
+      routes: [{ hostId: 'aico', gateway: '10.1.1.10', subnets: ['10.1.1.0/24'], path: ['10.1.1.10', '192.168.178.1'], wan: '84.1.2.3' }],
+      dns: [{ hostId: 'aico', nameservers: ['10.1.1.53'] }] });
+    const edges = s.filter((x) => x.type === 'network_link').map((x) => `${x.from}>${x.to ?? x.target?.kind}`);
+    expect(edges).toEqual(['aico>gw', 'gw>fritz', 'fritz>wan']);
+    expect(s.filter((x) => x.type === 'set_kind').map((x) => [x.from, x.data.kind, x.data.rename])).toEqual([['gw', 'router', 'Gateway 10.1.1.10'], ['fritz', 'router', null]]);
+    expect(s.some((x) => x.from === 'nas' || x.from === 'pi')).toBe(false); // same subnet ≠ dependency
     expect(s.find((x) => x.type === 'resolves_via')).toMatchObject({ to: null, target: { host: '10.1.1.53', kind: 'dns' } });
   });
 
+  it('a VM (Hermes inside AI-Company) does not depend on the gateway directly – its hypervisor does', () => {
+    const s = suggestDependencies({ ...base,
+      resources: [r('aico', 'vm', ['10.1.1.20'], { parentId: 'esx' }), r('esx', 'hypervisor', ['10.1.1.61']), r('gw', 'router', ['10.1.1.10']), r('fritz', 'router', ['192.168.178.1'])],
+      routes: [{ hostId: 'aico', gateway: '10.1.1.10', subnets: [], path: ['10.1.1.10', '192.168.178.1'], wan: '84.1.2.3' }] });
+    expect(s.filter((x) => x.type === 'network_link').map((x) => `${x.from}>${x.to ?? x.target?.kind}`)).toEqual(['gw>fritz', 'fritz>wan']);
+  });
+
+  it('cleanup: proposes removing edges created by the old same-subnet rule', () => {
+    const s = suggestDependencies({ ...base, resources: [r('nas', 'nas', ['10.1.1.30']), r('gw', 'router', ['10.1.1.10'])],
+      edges: [{ id: 'e1', from: 'nas', to: 'gw', suppressed: false, strength: 'soft', description: 'Vorschlag (routing): 10.1.1.30 liegt im selben Subnetz 10.1.1.0/24 wie Gateway 10.1.1.10' }] });
+    expect(s).toEqual([expect.objectContaining({ type: 'remove_edge', from: 'nas', to: 'gw', data: { dependency_id: 'e1' } })]);
+  });
+
+  it('same MAC = same device even without guest IP; same host name only as a hint', () => {
+    const s = suggestDependencies({ ...base,
+      resources: [r('opn-vm', 'vm', [], { macs: ['00:50:56:aa:00:03'] }), r('ep3', 'endpoint', ['10.1.1.3'], { macs: ['00:50:56:aa:00:03'] }),
+        r('aico-vm', 'vm', [], { label: 'AI-Company', discovered: { guest_hostname: 'aicompany-hq' } }), r('aico-ep', 'endpoint', ['10.1.1.20'], { label: 'aicompany-hq.lan' })] });
+    expect(s.find((x) => x.from === 'ep3')).toMatchObject({ type: 'same_as', to: 'opn-vm', confidence: 'sure' });
+    expect(s.find((x) => x.from === 'aico-ep')).toMatchObject({ type: 'same_as', to: 'aico-vm', confidence: 'hint' });
+  });
+
   it('never re-suggests existing or removed edges, nor the reverse of an existing edge', () => {
-    const res = [r('host', 'host', ['10.1.1.10']), r('gw', 'router', ['10.1.1.1'])];
+    const res = [r('host', 'host', ['10.1.1.10']), r('gw', 'router', ['10.1.1.1'])]; // router: no set_kind
     const routes = [{ hostId: 'host', gateway: '10.1.1.1', subnets: [] }];
     expect(suggestDependencies({ ...base, resources: res, routes, edges: [{ from: 'host', to: 'gw', suppressed: true }] })).toEqual([]);
     expect(suggestDependencies({ ...base, resources: res, routes, edges: [{ from: 'gw', to: 'host', suppressed: false }] })).toEqual([]);

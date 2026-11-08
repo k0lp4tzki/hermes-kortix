@@ -45,7 +45,8 @@ export function mapVsphere(hosts: VsphereObject[], vms: VsphereObject[], datasto
     const uuid = v.props['config.instanceUuid'];
     const nets = arr(v.props['guest.net']);
     const ips = [...new Set([v.props['guest.ipAddress'], ...nets.flatMap((n: any) => arr(n?.ipAddress))].filter(isV4))].sort();
-    const macs = nets.map((n: any) => n?.macAddress).filter(Boolean).map((m: string) => m.toLowerCase()).sort();
+    const hwMacs = arr(v.props['config.hardware.device']).map((d: any) => d?.macAddress).filter(Boolean);
+    const macs = [...new Set([...nets.map((n: any) => n?.macAddress), ...hwMacs].filter(Boolean).map((m: string) => m.toLowerCase()))].sort();
     const parent = hostKey.get(String(v.props['runtime.host']));
     const power = v.props['runtime.powerState'] ?? null;
     items.push({
@@ -81,7 +82,7 @@ export const vmwareAdapter: DiscoveryAdapter = {
     try {
       await c.connect(source.config.username, await password(source));
       const hosts = await c.list('HostSystem', ['name', 'summary.hardware', 'summary.config.product.fullName', 'config.network.vnic', 'config.network.ipRouteConfig', 'runtime.connectionState', 'runtime.powerState', 'datastore']);
-      const vms = await c.list('VirtualMachine', ['name', 'config.instanceUuid', 'config.guestFullName', 'config.template', 'runtime.host', 'runtime.powerState', 'guest.ipAddress', 'guest.net', 'guest.hostName', 'guest.toolsRunningStatus', 'summary.config.numCpu', 'summary.config.memorySizeMB', 'datastore']);
+      const vms = await c.list('VirtualMachine', ['name', 'config.instanceUuid', 'config.guestFullName', 'config.template', 'config.hardware.device', 'runtime.host', 'runtime.powerState', 'guest.ipAddress', 'guest.net', 'guest.hostName', 'guest.toolsRunningStatus', 'summary.config.numCpu', 'summary.config.memorySizeMB', 'datastore']);
       const ds = await c.list('Datastore', ['name', 'summary.type', 'info']);
       return mapVsphere(hosts, vms, ds, new URL(source.config.url.includes('://') ? source.config.url : `https://${source.config.url}`).hostname);
     } finally {

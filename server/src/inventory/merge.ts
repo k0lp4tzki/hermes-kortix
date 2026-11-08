@@ -34,7 +34,7 @@ export async function mergeResources(c: pg.PoolClient, targetId: string, sourceI
       await q(`DELETE FROM resources WHERE id = $1`, [sourceId], c);
       await q(`INSERT INTO events(resource_id, kind, message, actor) VALUES ($1,'merge',$2,$3)`, [targetId, `„${src.name}“ (${src.kind}) wurde hier zusammengeführt`, actor], c);
     
-  if (['endpoint', 'other'].includes(target.kind) && !['endpoint', 'other'].includes(src.kind) && !(target.locked_fields ?? []).includes('kind')) {
+  if (!(target.locked_fields ?? []).includes('kind') && ((['endpoint', 'other'].includes(target.kind) && !['endpoint', 'other'].includes(src.kind)) || (target.kind === 'host' && src.kind === 'vm'))) {
     await q(`UPDATE resources SET kind = $2 WHERE id = $1`, [targetId, src.kind], c);
   }
   return true;
