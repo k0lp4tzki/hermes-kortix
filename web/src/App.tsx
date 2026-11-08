@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './lib/auth';
 import { startLive, useLiveConnected } from './lib/live';
@@ -19,6 +19,7 @@ function Shell() {
   const qc = useQueryClient();
   const { user, logout } = useAuth();
   const live = useLiveConnected();
+  const loc = useLocation();
   useEffect(() => startLive(qc), [qc]);
   const counts = useQuery({ queryKey: ['overview', 'nav'], queryFn: () => get('/nav-counts').catch(() => ({})), refetchInterval: 30000 });
   const c: Record<string, number> = counts.data ?? {};
@@ -41,7 +42,7 @@ function Shell() {
           </span>
         </div>
       </nav>
-      <main className="main">
+      <main className="main" style={loc.pathname === "/" ? { overflow: "hidden" } : undefined}>
         <Routes>
           {ROUTES.map((r) => <Route key={r.path} path={r.path} element={r.element} />)}
           <Route path="*" element={<Navigate to="/" replace />} />

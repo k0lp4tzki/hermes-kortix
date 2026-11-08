@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { get } from '../lib/api';
 import { ago, bytes, dur, fmt, ts } from '../lib/format';
+import { Link } from 'react-router-dom';
 import { Badge, StatusBadge } from '../components/ui';
 
 export default function Platform() {
@@ -8,9 +9,12 @@ export default function Platform() {
   const d = h.data;
   const stale = (age: number) => (age > 60 ? 'critical' : age > 25 ? 'warning' : 'ok');
   const workerBeat = d?.components?.find((c: any) => c.component === 'worker');
+  const ov = useQuery({ queryKey: ['overview'], queryFn: () => get('/overview') });
+  const pr = ov.data?.platformResource;
   return (
     <div className="page">
-      <div className="page-head"><h1>Plattform-Zustand</h1><span className="sub">Selbstüberwachung von Hermes: Komponenten, Scheduler, Datenbank, Aufbewahrung</span></div>
+      <div className="page-head"><h1>Plattform-Zustand</h1><span className="sub">Selbstüberwachung von Hermes: Komponenten, Scheduler, Datenbank, Aufbewahrung</span>
+        {pr && <div className="actions"><StatusBadge status={pr.status} /><Link className="btn" to={`/resources/${pr.id}`}>Verlauf & Schwellwerte der Selbstüberwachung</Link></div>}</div>
       {d && !workerBeat && <div className="callout crit" style={{ marginBottom: 12 }}>Kein Heartbeat des Workers – Checks und Discovery laufen nicht.</div>}
       {workerBeat && workerBeat.age_s > 60 && <div className="callout crit" style={{ marginBottom: 12 }}>Worker-Heartbeat seit {dur(workerBeat.age_s)} ausgeblieben – Checks laufen nicht.</div>}
       <div className="tiles" style={{ marginBottom: 12 }}>

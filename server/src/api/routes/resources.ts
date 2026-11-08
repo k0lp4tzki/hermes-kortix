@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { notify, q, q1, tx } from '../../db/pool.js';
+import { notify, pool, q, q1, tx } from '../../db/pool.js';
 import { findDuplicates } from '../../core/reconcile.js';
 import { RESOURCE_KINDS } from '../../core/types.js';
 import { audit, HttpError, requireRole } from '../auth.js';
 import { notFound, parse } from '../util.js';
+import { createChecks } from '../../checks/defaults.js';
 
 const kind = z.enum(RESOURCE_KINDS as [string, ...string[]]);
 const crit = z.enum(['low', 'medium', 'high', 'critical']);
@@ -68,13 +69,25 @@ export default async function resourceRoutes(app: FastifyInstance) {
 
   app.post('/api/resources', async (req) => {
     requireRole(req, 'operator');
-    const b = parse(editable.partial().required({ name: true, kind: true }), req.body);
+    const b = parse(editable.partial().required({ name: true, kind: true }).extend({ default_checks: z.boolean().optional() }), req.body);
     const row = await q1(`INSERT INTO resources(kind, name, display_name, parent_id, environment, group_name, criticality, owner, tags, metadata, connection, notes,
         origin, monitoring_enabled, status, first_seen_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'manual',$13,$14, now()) RETURNING id`, [
       b.kind, b.name, b.display_name ?? null, b.parent_id ?? null, b.environment ?? null, b.group_name ?? null, b.criticality ?? 'medium', b.owner ?? null,
       b.tags ?? [], b.metadata ?? {}, b.connection ?? {}, b.notes ?? null, b.monitoring_enabled ?? true, (b.monitoring_enabled ?? true) ? 'pending' : 'unmonitored']);
     await q(`INSERT INTO events(resource_id, kind, message, actor) VALUES ($1,'config','Manuell angelegt',$2)`, [row!.id, req.user!.username]);
+    if (b.default_checks) {
+      // reachability checks from the connection data a person entered: ping for an address, HTTP + TLS for a URL, TCP for a port
+      const c = b.connection ?? {};
+      const tpl: Array<{ type: string; name: string; config?: Record<string, unknown> }> = [];
+      if (c.host) tpl.push({ type: 'ping', name: 'Erreichbarkeit (Ping)' });
+      if (c.host && c.port) tpl.push({ type: 'tcp', name: `TCP :${c.port}` });
+      if (c.url) {
+        tpl.push({ type: 'http', name: 'HTTP-Endpunkt', config: { url: c.url } });
+        if (String(c.url).startsWith('https://')) tpl.push({ type: 'tls', name: 'TLS-Zertifikat', config: { host: new URL(String(c.url)).hostname, port: Number(new URL(String(c.url)).port || 443) } });
+      }
+      await createChecks(pool, row!.id, tpl, 'manual');
+    }
     await audit(req, 'resource.created', b.name, { kind: b.kind });
     await notify('inventory');
     return q1(`${RESOURCE_SELECT} WHERE r.id = $1`, [row!.id]);

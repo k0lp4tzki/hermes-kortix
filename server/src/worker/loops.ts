@@ -12,6 +12,7 @@ export function loopStats() { return { ...stats }; }
 export const loops: Loop[] = [
   { name: 'scheduler', everyMs: 500, fn: schedulerTick },
   { name: 'evaluate', everyMs: 2000, fn: evaluateTick },
-  { name: 'discovery', everyMs: 2000, fn: discoveryTick },
+  // with several workers, run discovery in one of them only (HERMES_DISCOVERY_ENABLED=false elsewhere)
+  ...(process.env.HERMES_DISCOVERY_ENABLED === 'false' ? [] : [{ name: 'discovery', everyMs: 2000, fn: discoveryTick }]),
   { name: 'prune', everyMs: 3600_000, fn: pruneTick },
 ];

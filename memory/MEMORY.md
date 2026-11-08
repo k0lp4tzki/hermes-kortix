@@ -13,3 +13,5 @@ To work with memory, load the **kortix-memory** skill.
 
 <!-- Add one line per sub-file as you create them, e.g.:
 - [connections.md](connections.md) — third parties, MCP servers, channels -->
+
+- [hermes.md](hermes.md) — the Hermes monitoring product in this repo: layout, tests, extension points, sandbox gotchas

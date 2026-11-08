@@ -6,6 +6,7 @@ x-hermes-env: &hermes-env
   DATABASE_URL: postgres://hermes:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/hermes
   HERMES_SECRET_KEY: ${HERMES_SECRET_KEY:?set HERMES_SECRET_KEY in .env}
   HERMES_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-hermes}
+  HERMES_PUBLIC_URL: ${HERMES_PUBLIC_URL:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   TZ: ${TZ:-Europe/Berlin}
 

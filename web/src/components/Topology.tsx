@@ -118,7 +118,7 @@ export function Topology({ data, filter, selectedId, onSelect, onConnect, showLa
       const failing = st === 'critical';
       const color = failing ? '#f43f5e' : st === 'warning' ? '#fbbf24' : st === 'ok' ? '#2f6b57' : '#3b4756';
       const attrs = e.attributes ?? {};
-      const label = showLabels ? [attrs.vlan ? `VLAN ${attrs.vlan}` : null, attrs.subnet, attrs.network, attrs.port, attrs.label].filter(Boolean).join(' · ') || (e.type !== 'runs_on' && e.type !== 'depends_on' ? DEP_TYPES[e.type] : '') : '';
+      const label = showLabels ? [attrs.vlan ? `VLAN ${attrs.vlan}` : null, attrs.subnet, attrs.network, attrs.port, attrs.label].filter(Boolean).join(' · ') || (!['runs_on', 'depends_on', 'network_link', 'other'].includes(e.type) ? DEP_TYPES[e.type] : '') : '';
       const dim = !!focus && !(focus.has(e.from_id) && focus.has(e.to_id));
       return {
         id: e.id, source: e.from_id, target: e.to_id, type: 'smoothstep', animated: failing,
@@ -153,7 +153,7 @@ export function Topology({ data, filter, selectedId, onSelect, onConnect, showLa
         onPaneClick={() => onSelect?.(null)}
         onConnect={onConnect ? (c: Connection) => c.source && c.target && c.source !== c.target && onConnect(c.source, c.target) : undefined}
         nodesConnectable={!!onConnect}
-        fitView fitViewOptions={{ padding: 0.12, maxZoom: 1.1 }}
+        fitView fitViewOptions={{ padding: 0.08, maxZoom: 1.1, minZoom: 0.45 }}
         onInit={() => setFitted(structureKey)}
         minZoom={0.15} maxZoom={2} proOptions={{ hideAttribution: true }} colorMode="dark"
       >
