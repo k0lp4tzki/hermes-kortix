@@ -34,18 +34,20 @@ const ResourceNode = memo(({ data }: NodeProps<Node<NodeData>>) => {
     <div title={`${r.label}\n${KIND_LABEL[r.kind] ?? r.kind} · ${r.status}${r.status_message ? '\n' + r.status_message : ''}\nseit ${ago(r.status_since)}`}
       style={{
         width: 196, height: 52, display: 'flex', alignItems: 'stretch', background: '#0d141c', border: `1px solid ${border}`, borderStyle: (impacted || symptom) && !root ? 'dashed' : 'solid',
-        borderRadius: 9, opacity: data.dim ? 0.22 : 1, boxShadow: root ? `0 0 0 3px ${color}2e` : data.highlight === 'selected' ? '0 0 0 3px #38bdf833' : 'none', overflow: 'hidden', cursor: 'pointer',
+        borderRadius: 9, opacity: data.dim ? 0.22 : 1, boxShadow: root ? `0 0 0 3px ${color}2e` : data.highlight === 'selected' ? '0 0 0 3px #38bdf833' : 'none', cursor: 'pointer', position: 'relative',
       }}>
-      <Handle type="target" position={Position.Bottom} style={{ background: '#2a3a4b', border: 0, width: 7, height: 7 }} />
-      <div style={{ width: 4, background: color, flex: 'none' }} />
+      {/* bottom: things that depend on this resource connect here */}
+      <Handle type="target" position={Position.Bottom} className="hx-handle hx-down" title="Sind abhängig von dieser Ressource" data-label="Sind abhängig von dieser Ressource" />
+      <div style={{ width: 4, background: color, flex: 'none', borderRadius: '8px 0 0 8px' }} />
       <div style={{ width: 38, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 9.5, color: '#7d8a99', letterSpacing: '0.04em', borderRight: '1px solid #18222d' }}>{KIND_CODE[r.kind] ?? '·'}</div>
-      <div style={{ padding: '6px 9px', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+      <div style={{ padding: '6px 9px', minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
         <div style={{ fontSize: 12.5, fontWeight: 600, color: '#dbe4ee', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</div>
         <div style={{ fontSize: 10.5, color: r.status === 'critical' ? '#fda4af' : r.status === 'warning' ? '#fcd34d' : '#7d8a99', fontFamily: 'var(--mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {r.status === 'critical' || r.status === 'warning' ? (symptom ? 'Folgefehler' : r.status.toUpperCase()) : r.in_maintenance ? 'WARTUNG' : impacted ? 'betroffen' : sub}
         </div>
       </div>
-      <Handle type="source" position={Position.Top} style={{ background: '#2a3a4b', border: 0, width: 7, height: 7 }} />
+      {/* top: drag from here to the bottom point of a provider = "this depends on that" */}
+      <Handle type="source" position={Position.Top} className="hx-handle hx-up" title="Abhängig von" data-label="Abhängig von" />
     </div>
   );
 });
@@ -153,6 +155,8 @@ export function Topology({ data, filter, selectedId, onSelect, onConnect, showLa
         onPaneClick={() => onSelect?.(null)}
         onConnect={onConnect ? (c: Connection) => c.source && c.target && c.source !== c.target && onConnect(c.source, c.target) : undefined}
         nodesConnectable={!!onConnect}
+        connectionLineStyle={{ stroke: '#38bdf8', strokeWidth: 1.6, strokeDasharray: '4 3' }}
+        className={onConnect ? 'hx-connectable' : undefined}
         fitView fitViewOptions={{ padding: 0.08, maxZoom: 1.1, minZoom: 0.45 }}
         onInit={() => setFitted(structureKey)}
         minZoom={0.15} maxZoom={2} proOptions={{ hideAttribution: true }} colorMode="dark"
