@@ -58,6 +58,12 @@ export async function syncAutoStructure(db: Queryable) {
   await q(`UPDATE resources c SET parent_id = p.id FROM resources p
            WHERE c.parent_id IS NULL AND NOT ('parent_id' = ANY(c.locked_fields)) AND c.discovered->>'parent_key' IS NOT NULL
              AND (p.identity_key = c.discovered->>'parent_key' OR p.id = (SELECT resource_id FROM resource_aliases a WHERE a.identity_key = c.discovered->>'parent_key'))`, [], db);
+  // parent moved (VM migrated to another hypervisor, container on another engine): follow it
+  await q(`UPDATE resources c SET parent_id = p.id, last_change_at = now() FROM resources p
+           WHERE c.origin = 'auto' AND NOT ('parent_id' = ANY(c.locked_fields)) AND c.discovered->>'parent_key' IS NOT NULL
+             AND p.identity_key = c.discovered->>'parent_key' AND c.parent_id IS DISTINCT FROM p.id`, [], db);
+  await q(`DELETE FROM dependencies d USING resources c WHERE d.from_id = c.id AND d.type = 'runs_on' AND d.origin = 'auto' AND c.parent_id IS DISTINCT FROM d.to_id
+             AND NOT ('parent_id' = ANY(c.locked_fields))`, [], db);
   await q(`INSERT INTO dependencies(from_id, to_id, type, strength, origin)
            SELECT c.id, c.parent_id, 'runs_on', 'hard', 'auto' FROM resources c
            WHERE c.parent_id IS NOT NULL AND c.origin = 'auto'

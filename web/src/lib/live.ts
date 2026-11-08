@@ -10,6 +10,7 @@ const TOPIC_KEYS: Record<string, string[]> = {
   inventory: ['resources', 'resource', 'graph', 'overview', 'dependencies', 'checks'],
   notifications: ['notifications'],
   platform: ['platform'],
+  suggestions: ['suggestions', 'overview'],
 };
 
 let connected = false;

@@ -80,6 +80,8 @@ export interface TopologyProps {
   onConnect?: (fromId: string, toId: string) => void;
   showLabels?: boolean;
   height?: number | string;
+  /** a suggested edge drawn dashed (walkthrough); to may be null for a not-yet-existing target */
+  proposed?: { from: string; to: string | null } | null;
 }
 
 /**
@@ -87,7 +89,7 @@ export interface TopologyProps {
  * Status colours come from the server-side state engine; root causes are outlined red, impacted
  * downstream components dashed orange, maintenance purple.
  */
-export function Topology({ data, filter, selectedId, onSelect, onConnect, showLabels = true, height = '100%' }: TopologyProps) {
+export function Topology({ data, filter, selectedId, onSelect, onConnect, showLabels = true, height = '100%', proposed }: TopologyProps) {
   const visible = useMemo(() => {
     const ns = filter ? data.nodes.filter(filter) : data.nodes;
     const ids = new Set(ns.map((n) => n.id));
@@ -97,6 +99,7 @@ export function Topology({ data, filter, selectedId, onSelect, onConnect, showLa
   const positions = useMemo(() => layout(visible.nodes, visible.edges), [structureKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const focus = useMemo(() => {
+    if (proposed) return new Set([proposed.from, ...(proposed.to ? [proposed.to] : [])]);
     if (!selectedId) return null;
     const sel = data.nodes.find((n) => n.id === selectedId);
     if (!sel) return null;
@@ -106,13 +109,13 @@ export function Topology({ data, filter, selectedId, onSelect, onConnect, showLa
     const walk = (start: string, m: Map<string, string[]>) => { const st = [start]; while (st.length) { const x = st.pop()!; for (const y of m.get(x) ?? []) if (!set.has(y)) { set.add(y); st.push(y); } } };
     walk(selectedId, down); walk(selectedId, up);
     return set;
-  }, [selectedId, data]);
+  }, [selectedId, data, proposed]);
 
   const build = useCallback((): { nodes: Node<NodeData>[]; edges: Edge[] } => {
     const byId = new Map(data.nodes.map((n) => [n.id, n]));
     const nodes: Node<NodeData>[] = visible.nodes.map((r) => ({
       id: r.id, type: 'res', position: positions.get(r.id) ?? { x: 0, y: 0 },
-      data: { r, dim: !!focus && !focus.has(r.id), highlight: r.id === selectedId ? 'selected' : null },
+      data: { r, dim: !!focus && !focus.has(r.id), highlight: r.id === selectedId || r.id === proposed?.from || r.id === proposed?.to ? 'selected' : null },
     }));
     const edges: Edge[] = visible.edges.map((e) => {
       const provider = byId.get(e.to_id);
@@ -129,8 +132,13 @@ export function Topology({ data, filter, selectedId, onSelect, onConnect, showLa
         label: label || undefined, labelStyle: { fill: '#9aa8b8', fontSize: 10, fontFamily: 'var(--mono)' }, labelBgStyle: { fill: '#0b1118' }, labelBgPadding: [4, 2] as [number, number],
       };
     });
+    if (proposed?.to && visible.nodes.some((n) => n.id === proposed.from) && visible.nodes.some((n) => n.id === proposed.to)) {
+      edges.push({ id: 'proposed', source: proposed.from, target: proposed.to, type: 'smoothstep', animated: true,
+        style: { stroke: '#38bdf8', strokeWidth: 2.2, strokeDasharray: '6 4' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#38bdf8', width: 16, height: 16 },
+        label: 'Vorschlag', labelStyle: { fill: '#7dd3fc', fontSize: 10.5 }, labelBgStyle: { fill: '#0b1118' }, labelBgPadding: [4, 2] as [number, number] });
+    }
     return { nodes, edges };
-  }, [visible, positions, focus, selectedId, data, showLabels]);
+  }, [visible, positions, focus, selectedId, data, showLabels, proposed]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<NodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);

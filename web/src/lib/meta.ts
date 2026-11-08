@@ -14,5 +14,5 @@ export const DISCOVERY_LABEL: Record<string, string> = { active: 'aktiv', missin
 export const DEP_TYPES: Record<string, string> = {
   runs_on: 'läuft auf', depends_on: 'hängt ab von', uses_db: 'nutzt Datenbank', uses_cache: 'nutzt Cache', uses_broker: 'nutzt Message Broker',
   proxied_by: 'wird bereitgestellt über Proxy', resolves_via: 'löst Namen auf über DNS', backup_source: 'Backup von', backup_storage: 'Backup nach',
-  consumes_api: 'nutzt externe API', network_link: 'Netzwerkverbindung', powered_by: 'Strom über', other: 'sonstige Abhängigkeit',
+  consumes_api: 'nutzt externe API', network_link: 'Netzwerkverbindung', powered_by: 'Strom über', uses_storage: 'nutzt Storage', other: 'sonstige Abhängigkeit',
 };
