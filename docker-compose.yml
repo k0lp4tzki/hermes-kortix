@@ -1,0 +1,80 @@
+# Hermes - homelab monitoring. Start with:  cp .env.example .env  &&  docker compose up -d
+# Then open http://localhost:${HERMES_PORT:-8080} and log in with HERMES_ADMIN_USER / HERMES_ADMIN_PASSWORD.
+name: ${COMPOSE_PROJECT_NAME:-hermes}
+
+x-hermes-env: &hermes-env
+  DATABASE_URL: postgres://hermes:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/hermes
+  HERMES_SECRET_KEY: ${HERMES_SECRET_KEY:?set HERMES_SECRET_KEY in .env}
+  HERMES_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-hermes}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  TZ: ${TZ:-Europe/Berlin}
+
+services:
+  db:
+    image: timescale/timescaledb:2.17.2-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hermes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: hermes
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - hermes-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    labels:
+      hermes.role: database
+
+  api:
+    build: .
+    image: hermes:latest
+    restart: unless-stopped
+    command: ["node", "dist/api/main.js"]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      <<: *hermes-env
+      HERMES_COMPONENT: hermes-api
+      HERMES_ADMIN_USER: ${HERMES_ADMIN_USER:-admin}
+      HERMES_ADMIN_PASSWORD: ${HERMES_ADMIN_PASSWORD:?set HERMES_ADMIN_PASSWORD in .env}
+      HERMES_COOKIE_SECURE: ${HERMES_COOKIE_SECURE:-false}
+    ports:
+      - "${HERMES_BIND:-0.0.0.0}:${HERMES_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    labels:
+      hermes.role: api
+
+  worker:
+    image: hermes:latest
+    restart: unless-stopped
+    command: ["node", "dist/worker/main.js"]
+    depends_on:
+      db: { condition: service_healthy }
+      api: { condition: service_started }
+    environment:
+      <<: *hermes-env
+      HERMES_COMPONENT: hermes-worker
+      HERMES_HOST_NAME: ${HERMES_HOST_NAME:-}
+      HERMES_WORKER_CONCURRENCY: ${HERMES_WORKER_CONCURRENCY:-16}
+    # ICMP ping without running as root/privileged
+    cap_add: [NET_RAW]
+    # Host introspection is read-only: /proc, /sys and the root filesystem (for df/inodes)
+    # plus the Docker socket for container discovery and stats. Remove a mount to turn the
+    # corresponding feature off; the UI then shows "nicht verfügbar".
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/hostfs:ro
+    labels:
+      hermes.role: worker
+
+volumes:
+  hermes-db:
