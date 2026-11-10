@@ -23,7 +23,7 @@ export type PlanAction =
   | { type: 'create_resource'; item: DiscoveredItem; rule: DiscoveryRule }
   | { type: 'upsert_candidate'; candidateId?: string; item: DiscoveredItem; status: 'pending' | 'ignored'; rule: DiscoveryRule | null; isNew: boolean }
   | { type: 'touch_candidate'; candidateId: string; item: DiscoveredItem }
-  | { type: 'attach_resource'; resourceId: string; item: DiscoveredItem; ip: string }
+  | { type: 'attach_resource'; resourceId: string; item: DiscoveredItem; ip: string; via: 'ip' | 'mac' }
   | { type: 'mark_missing'; resourceId: string }
   | { type: 'mark_orphaned'; resourceId: string };
 
@@ -38,6 +38,16 @@ export interface ReconcileInput {
   orphanAfterMs: number;
   /** IPv4 → id of the one inventory resource (not a container) owning that address */
   ipIndex?: Map<string, string>;
+  /** MAC → id of the one inventory resource (not a container) owning that network card */
+  macIndex?: Map<string, string>;
+}
+
+const usableMac = (m: unknown): m is string => typeof m === 'string' && /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(m) && m !== '00:00:00:00:00:00';
+
+/** MAC addresses an item or resource claims (attributes.macs), normalised. */
+export function itemMacs(attrs: Record<string, any> | null | undefined): string[] {
+  const a = attrs ?? {};
+  return [...new Set((Array.isArray(a.macs) ? a.macs : []).map((m: unknown) => String(m).toLowerCase()).filter(usableMac))] as string[];
 }
 
 const usableIp = (ip: unknown): ip is string => typeof ip === 'string' && /^\d+\.\d+\.\d+\.\d+$/.test(ip) && !ip.startsWith('127.') && !ip.startsWith('169.254.');
@@ -101,12 +111,14 @@ export function reconcile(input: ReconcileInput): PlanAction[] {
       continue;
     }
     // the same machine is already in the inventory under another name (same IP): attach, do not duplicate
-    if (item.kind !== 'container' && input.ipIndex) {
-      const ip = itemIps(item.attributes, item.connection).find((x) => input.ipIndex!.has(x));
-      const resId = ip ? input.ipIndex.get(ip)! : null;
-      if (ip && resId && !seenResourceIds.has(resId)) {
+    // MAC first: it identifies a network card even when a VM reports no guest IP (no VMware Tools)
+    if (item.kind !== 'container') {
+      const mac = input.macIndex ? itemMacs(item.attributes).find((x) => input.macIndex!.has(x)) : undefined;
+      const ip = !mac && input.ipIndex ? itemIps(item.attributes, item.connection).find((x) => input.ipIndex!.has(x)) : undefined;
+      const resId = mac ? input.macIndex!.get(mac)! : ip ? input.ipIndex!.get(ip)! : null;
+      if (resId && !seenResourceIds.has(resId)) {
         seenResourceIds.add(resId);
-        plan.push({ type: 'attach_resource', resourceId: resId, item, ip });
+        plan.push({ type: 'attach_resource', resourceId: resId, item, ip: (mac ?? ip)!, via: mac ? 'mac' : 'ip' });
         continue;
       }
     }
@@ -141,7 +153,7 @@ export function normalizeName(name: string): string {
   return name.toLowerCase().replace(/^\//, '').replace(/[-_.](\d+)$/, '').replace(/[^a-z0-9]/g, '');
 }
 
-export interface DupResource { id: string; name: string; kind: string; address?: string | null; containerId?: string | null; ips?: string[] }
+export interface DupResource { id: string; name: string; kind: string; address?: string | null; containerId?: string | null; ips?: string[]; macs?: string[] }
 export interface DupGroup { reason: string; confidence: 'sure' | 'hint'; ids: string[] }
 
 /**
@@ -168,6 +180,7 @@ export function findDuplicates(resources: DupResource[]): DupGroup[] {
     return m;
   };
   for (const [k, ids] of bucket((r) => [r.containerId])) add(`gleiche Container-ID ${k.slice(0, 12)}`, 'sure', ids);
+  for (const [k, ids] of bucket((r) => (r.kind === 'container' ? [] : (r.macs ?? []).filter(usableMac)))) add(`gleiche MAC-Adresse ${k}`, 'sure', ids);
   for (const [k, ids] of bucket((r) => (r.kind === 'container' ? [] : (r.ips ?? []).filter(usableIp)))) add(`gleiche IP-Adresse ${k}`, 'sure', ids);
   for (const [k, ids] of bucket((r) => [r.address ? r.address.toLowerCase() : null])) add(`gleiche Adresse ${k}`, 'sure', ids);
   for (const [k, ids] of bucket((r) => [(['host', 'vm', 'hypervisor', 'nas'].includes(r.kind) ? 'host:' : 'svc:') + normalizeName(r.name)])) {

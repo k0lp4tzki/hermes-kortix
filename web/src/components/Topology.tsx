@@ -20,10 +20,11 @@ const STATUS_COLOR: Record<string, string> = { ok: '#34d399', warning: '#fbbf24'
 export const LAYERS: Array<{ key: string; label: string; kinds: string[] }> = [
   { key: 'internet', label: 'Internet & externe Dienste', kinds: ['wan', 'external_api'] },
   { key: 'network', label: 'Netzwerk', kinds: ['router', 'firewall', 'switch', 'access_point', 'network', 'dns', 'dhcp'] },
-  { key: 'hosts', label: 'Hosts & Hypervisoren', kinds: ['hypervisor', 'host', 'endpoint'] },
+  { key: 'hosts', label: 'Hosts & Hypervisoren', kinds: ['hypervisor', 'host'] },
   { key: 'vms', label: 'Virtuelle Maschinen', kinds: ['vm'] },
   { key: 'apps', label: 'Container & Dienste', kinds: [] },
   { key: 'storage', label: 'Storage', kinds: ['nas', 'storage'] },
+  { key: 'unassigned', label: 'Nicht zugeordnet (Typ unbekannt – im Inventar einordnen)', kinds: ['endpoint', 'other'] },
 ];
 export function layerOf(kind: string): number {
   const i = LAYERS.findIndex((l) => l.kinds.includes(kind));
@@ -196,7 +197,9 @@ export function Topology({ data, filter, selectedId, onSelect, onConnect, showLa
       const label = showLabels ? [attrs.vlan ? `VLAN ${attrs.vlan}` : null, attrs.subnet, attrs.network, attrs.port, attrs.label].filter(Boolean).join(' · ') || (!['runs_on', 'depends_on', 'network_link', 'uses_storage', 'other'].includes(e.type) ? DEP_TYPES[e.type] : '') : '';
       const dim = !!focus && !(focus.has(e.from_id) && focus.has(e.to_id));
       return {
-        id: e.id, source: e.from_id, target: e.to_id, ...anchors(positions.pos.get(e.from_id), positions.pos.get(e.to_id)), type: 'smoothstep', animated: failing,
+        id: e.id, source: e.from_id, target: e.to_id, ...anchors(positions.pos.get(e.from_id), positions.pos.get(e.to_id)), animated: failing,
+        // an edge that skips a layer is drawn as a curve so it does not look like it ends at a node in between
+        type: Math.abs(layerOf(byId.get(e.from_id)?.kind ?? '') - layerOf(provider?.kind ?? '')) > 1 ? 'default' : 'smoothstep',
         style: { stroke: color, strokeWidth: e.strength === 'hard' ? 1.6 : 1.1, strokeDasharray: e.strength === 'soft' ? '5 4' : undefined, opacity: dim ? 0.12 : 1 },
         markerEnd: { type: MarkerType.ArrowClosed, color, width: 14, height: 14 },
         label: label || undefined, labelStyle: { fill: '#9aa8b8', fontSize: 10, fontFamily: 'var(--mono)' }, labelBgStyle: { fill: '#0b1118' }, labelBgPadding: [4, 2] as [number, number],

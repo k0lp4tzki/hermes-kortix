@@ -3,6 +3,7 @@ import type { DiscoveryAdapter } from './adapter.js';
 import { activeSystemdUnits, hostIps, hostName, hostProcAvailable, osRelease, readText } from './hostinfo.js';
 import { config } from '../lib/config.js';
 import { join } from 'node:path';
+import { readdir } from 'node:fs/promises';
 
 const UNIT_IGNORE = /^(systemd-|user@|user-runtime-dir@|getty@|serial-getty@|session-|dbus|init\.scope|-\.slice|.*\.slice$|.*\.scope$|.*\.mount$|.*\.device$|.*\.swap$|.*\.socket$|.*\.target$|.*\.path$|.*\.timer$)/;
 
@@ -24,9 +25,17 @@ export const hostAdapter: DiscoveryAdapter = {
     const kernel = (await readText(join(config.hostProc, 'sys/kernel/osrelease')))?.trim() ?? null;
     const virt = (await readText(join(config.hostSys, 'class/dmi/id/product_name')))?.trim() ?? null;
     const ips = await hostIps();
+    const macs: string[] = [];
+    try {
+      for (const ifc of await readdir(join(config.hostSys, 'class/net'))) {
+        if (/^(lo|docker|br-|veth|virbr|cni|flannel|cali|vxlan|kube|tun|tap|wg)/.test(ifc)) continue;
+        const mac = (await readText(join(config.hostSys, 'class/net', ifc, 'address')))?.trim().toLowerCase();
+        if (mac && mac !== '00:00:00:00:00:00') macs.push(mac);
+      }
+    } catch { /* no sysfs */ }
     const items: DiscoveredItem[] = [{
       identityKey: key, kind: 'host', name, running: true,
-      attributes: { os: await osRelease(), kernel, cpu_model: model, cpus, mem_total: memKb * 1024, ips, product: virt, procfs: config.hostProc },
+      attributes: { os: await osRelease(), kernel, cpu_model: model, cpus, mem_total: memKb * 1024, ips, macs: [...new Set(macs)].sort(), product: virt, procfs: config.hostProc },
       connection: { host: ips[0] ?? null },
     }];
     if (source.config.systemd !== false) {

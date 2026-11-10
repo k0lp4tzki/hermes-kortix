@@ -9,8 +9,11 @@ import { Badge, Empty, Icon, StatusBadge, useToast } from './ui';
 
 export const CONF_LABEL: Record<string, string> = { sure: 'sicher', evidence: 'beobachtet', hint: 'Vermutung' };
 export const CONF_KIND: Record<string, string> = { sure: 'ok', evidence: 'info', hint: '' };
-export const SOURCE_LABEL: Record<string, string> = { vmware: 'VMware', connections: 'Verbindungen', routing: 'Routing', dns: 'DNS', identity: 'gleiche IP' };
-export const typeLabel = (t: string) => (t === 'same_as' ? 'ist dasselbe Gerät wie' : DEP_TYPES[t] ?? t);
+export const SOURCE_LABEL: Record<string, string> = { vmware: 'VMware', connections: 'Verbindungen', routing: 'Routing/Traceroute', dns: 'DNS', identity: 'Identität', cleanup: 'Bereinigung' };
+export const typeLabel = (t: string) => (t === 'same_as' ? 'ist dasselbe Gerät wie' : t === 'remove_edge' ? 'Abhängigkeit entfernen' : t === 'set_kind' ? 'Typ ändern' : DEP_TYPES[t] ?? t);
+const ACCEPT_LABEL: Record<string, [string, string, string]> = {
+  same_as: ['merge', 'Zusammenführen', 'Verschiedene Geräte'], remove_edge: ['trash', 'Entfernen', 'Behalten'], set_kind: ['check', 'Einordnen', 'Nicht ändern'],
+};
 
 export function useSuggestions(status = 'pending') {
   return useQuery({ queryKey: ['suggestions', status], queryFn: () => get<any[]>(`/suggestions?status=${status}`), refetchInterval: 30000 });
@@ -21,7 +24,7 @@ export function useSuggestionActions() {
   const toast = useToast();
   const refresh = () => ['suggestions', 'graph', 'dependencies', 'resources', 'overview'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
   const accept = useMutation({ mutationFn: (b: { ids: string[]; type?: string; strength?: string }) => post('/suggestions/accept', b),
-    onSuccess: (r: any) => { refresh(); toast([r.created ? `${r.created} Abhängigkeit(en) übernommen` : '', r.merged ? `${r.merged} Eintrag/Einträge zusammengeführt` : '', r.newResources ? `${r.newResources} Ressource(n) angelegt` : ''].filter(Boolean).join(', ') || 'Nichts geändert'); }, onError: (e: Error) => toast(e.message, true) });
+    onSuccess: (r: any) => { refresh(); toast([r.created ? `${r.created} Abhängigkeit(en) übernommen` : '', r.merged ? `${r.merged} Eintrag/Einträge zusammengeführt` : '', r.removed ? `${r.removed} Abhängigkeit(en) entfernt` : '', r.reclassified ? `${r.reclassified} Typ(en) geändert` : '', r.newResources ? `${r.newResources} Ressource(n) angelegt` : ''].filter(Boolean).join(', ') || 'Nichts geändert'); }, onError: (e: Error) => toast(e.message, true) });
   const reject = useMutation({ mutationFn: (ids: string[]) => post('/suggestions/reject', { ids }), onSuccess: () => { refresh(); }, onError: (e: Error) => toast(e.message, true) });
   const analyze = useMutation({ mutationFn: () => post('/suggestions/analyze'), onSuccess: () => { toast('Analyse läuft – neue Vorschläge erscheinen in wenigen Sekunden'); setTimeout(refresh, 4000); } });
   return { accept, reject, analyze };
@@ -57,7 +60,7 @@ export function SuggestionList({ onWalkthrough }: { onWalkthrough?: () => void }
         </>}
       </div>
       <div className="sub" style={{ marginBottom: 10 }}>
-        Quellen: gleiche IP-Adresse = dasselbe Gerät (wird zusammengeführt), VMware-API (VM läuft auf ESX-Host, VM-Daten auf NAS, Gateway des ESX-Hosts), beobachtete TCP-Verbindungen der Container und des Hosts, Routing-Tabelle und Resolver des Hosts, gleiches Subnetz wie das Gateway (Vermutung).
+        Quellen: gleiche MAC- oder IP-Adresse = dasselbe Gerät (sicher, wird zusammengeführt), gleicher Hostname (Vermutung), VMware-API (VM läuft auf ESX-Host, VM-Daten auf NAS, Gateway des ESX-Hosts), Routing-Tabelle und Traceroute des Hermes-Hosts (Gateway-Kette bis ins Internet), beobachtete TCP-Verbindungen, Resolver. Bereinigung schlägt das Entfernen falscher alter Abhängigkeiten vor.
         Nichts wird ohne Bestätigung eingetragen; abgelehnte Vorschläge kommen nicht wieder.
       </div>
       <div className="panel flush table-wrap">
@@ -70,8 +73,8 @@ export function SuggestionList({ onWalkthrough }: { onWalkthrough?: () => void }
               <tr key={s.id}>
                 {status === 'pending' && <td><input type="checkbox" aria-label="auswählen" checked={sel.has(s.id)} onChange={() => { const n = new Set(sel); n.has(s.id) ? n.delete(s.id) : n.add(s.id); setSel(n); }} /></td>}
                 <td><StatusBadge status={s.from_status} label="" /> <Link to={`/resources/${s.from_id}`}>{s.from_name}</Link> <span className="dim">{KIND_LABEL[s.from_kind]}</span></td>
-                <td>{s.type === 'same_as' ? <Badge kind="warning">dasselbe Gerät wie</Badge> : typeLabel(s.type)}</td>
-                <td>{s.to_id ? <><StatusBadge status={s.to_status} label="" /> <Link to={`/resources/${s.to_id}`}>{s.to_name}</Link> <span className="dim">{KIND_LABEL[s.to_kind]}</span></>
+                <td>{s.type === 'same_as' ? <Badge kind="warning">dasselbe Gerät wie</Badge> : s.type === 'remove_edge' ? <Badge kind="critical">entfernen</Badge> : s.type === 'set_kind' ? <Badge kind="info">als {KIND_LABEL[s.data?.kind] ?? s.data?.kind}</Badge> : typeLabel(s.type)}</td>
+                <td>{s.type === 'set_kind' ? <span className="dim">{s.data?.rename ? `Name: ${s.data.rename}` : '–'}</span> : s.to_id ? <><StatusBadge status={s.to_status} label="" /> <Link to={`/resources/${s.to_id}`}>{s.to_name}</Link> <span className="dim">{KIND_LABEL[s.to_kind]}</span></>
                   : <><Badge kind="warning">neu</Badge> <span className="mono">{s.target?.host}{s.target?.port ? `:${s.target.port}` : ''}</span> <span className="dim">als {KIND_LABEL[s.target?.kind] ?? s.target?.kind}</span></>}</td>
                 <td><Badge kind={CONF_KIND[s.confidence]}>{CONF_LABEL[s.confidence]}</Badge> <span className="dim" style={{ fontSize: 11 }}>{SOURCE_LABEL[s.source]}</span></td>
                 <td style={{ maxWidth: 460, fontSize: 12.5 }} className="dim">{s.evidence}</td>
@@ -106,15 +109,18 @@ export function Walkthrough({ list, index, setIndex, onClose }: { list: any[]; i
         <div><span className="dim" style={{ fontSize: 11 }}>{KIND_LABEL[s.from_kind]}</span><b>{s.from_name}</b></div>
         <div className="arrow">
           {s.type === 'same_as' ? <span className="badge warning">= dasselbe Gerät</span>
+            : s.type === 'remove_edge' ? <span className="badge critical">✕ entfernen</span>
+            : s.type === 'set_kind' ? <span className="badge info">→ {KIND_LABEL[s.data?.kind] ?? s.data?.kind}</span>
             : <select value={type ?? s.type} onChange={(e) => setType(e.target.value)} aria-label="Art">{Object.entries(DEP_TYPES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
         </div>
-        <div><span className="dim" style={{ fontSize: 11 }}>{s.to_id ? KIND_LABEL[s.to_kind] : `neu als ${KIND_LABEL[s.target?.kind] ?? s.target?.kind}`}</span><b>{targetLabel(s)}</b></div>
+        <div><span className="dim" style={{ fontSize: 11 }}>{s.type === 'set_kind' ? 'neuer Typ' : s.to_id ? KIND_LABEL[s.to_kind] : `neu als ${KIND_LABEL[s.target?.kind] ?? s.target?.kind}`}</span>
+          <b>{s.type === 'set_kind' ? `${KIND_LABEL[s.data?.kind] ?? s.data?.kind}${s.data?.rename ? ` („${s.data.rename}“)` : ''}` : targetLabel(s)}</b></div>
       </div>
       <div className="row" style={{ gap: 6, margin: '8px 0' }}><Badge kind={CONF_KIND[s.confidence]}>{CONF_LABEL[s.confidence]}</Badge><span className="dim" style={{ fontSize: 11.5 }}>{SOURCE_LABEL[s.source]} · {s.observations}× gesehen</span></div>
       <div className="cc-msg">{s.evidence}</div>
       <div className="row" style={{ flexWrap: 'wrap' }}>
-        <button className="primary" disabled={accept.isPending} onClick={() => accept.mutate({ ids: [s.id], type: type ?? undefined }, { onSuccess: next })}><Icon name={s.type === 'same_as' ? 'merge' : 'check'} />{s.type === 'same_as' ? 'Zusammenführen' : 'Übernehmen'}</button>
-        <button onClick={() => reject.mutate([s.id], { onSuccess: next })}>{s.type === 'same_as' ? 'Verschiedene Geräte' : 'Ablehnen'}</button>
+        <button className="primary" disabled={accept.isPending} onClick={() => accept.mutate({ ids: [s.id], type: type ?? undefined }, { onSuccess: next })}><Icon name={ACCEPT_LABEL[s.type]?.[0] ?? 'check'} />{ACCEPT_LABEL[s.type]?.[1] ?? 'Übernehmen'}</button>
+        <button onClick={() => reject.mutate([s.id], { onSuccess: next })}>{ACCEPT_LABEL[s.type]?.[2] ?? 'Ablehnen'}</button>
         <button className="ghost" onClick={next}>Später</button>
         {index > 0 && <button className="ghost" onClick={() => setIndex(index - 1)}>Zurück</button>}
       </div>

@@ -28,7 +28,7 @@ export function templatesFor(item: Pick<DiscoveredItem, 'kind' | 'attributes' | 
       for (const p of ports) {
         if (p === 22) out.push({ type: 'ssh', name: 'SSH', config: { port: 22 } });
         else if (p === 443 || p === 8443) { out.push({ type: 'http', name: `HTTPS :${p}`, config: { url: `https://${a.ip}:${p}/`, tls_verify: false, expected_status: '200-499' } }); out.push({ type: 'tls', name: `TLS-Zertifikat :${p}`, config: { port: p, allow_untrusted: true } }); }
-        else if ([80, 8080, 3000, 9000, 9090, 8006].includes(p)) out.push({ type: 'http', name: `HTTP :${p}`, config: { url: `http://${a.ip}:${p}/`, expected_status: '200-499' } });
+        else if ([80, 8080, 3000, 9000, 9090, 8006].includes(p)) out.push({ type: 'http', name: `HTTP :${p}`, config: { url: `http://${a.ip}:${p}/`, expected_status: '200-499', tls_verify: false } });
         else out.push({ type: 'tcp', name: `TCP :${p}`, config: { port: p } });
       }
       return out;

@@ -23,7 +23,8 @@ export async function resolveIdentity(db: Queryable, key: string | undefined | n
 }
 
 export function discoveredPayload(item: DiscoveredItem) {
-  return { ...item.attributes, parent_key: item.parentIdentityKey ?? null, depends_on: item.dependsOn ?? [] };
+  // a source without a parent (host adapter) must not erase the parent another source knows (vSphere)
+  return { ...item.attributes, ...(item.parentIdentityKey ? { parent_key: item.parentIdentityKey } : {}), depends_on: item.dependsOn ?? [] };
 }
 
 /** Turns a discovered item into an inventory resource (auto-accept rule or approval in the inbox). */

@@ -74,6 +74,12 @@ describe('reconcile', () => {
     expect(plan[1]).toMatchObject({ type: 'upsert_candidate' }); // containers never match by IP
   });
 
+  it('attaches by MAC when a VM reports no IP (no VMware Tools), MAC wins over IP', () => {
+    const plan = reconcile({ ...base, resources: [], ipIndex: new Map([['10.1.1.9', 'other']]), macIndex: new Map([['00:50:56:aa:00:03', 'opn']]),
+      items: [item('vmware-vm:opn', { ips: ['10.1.1.9'], macs: ['00:50:56:AA:00:03'] }, { kind: 'vm' })] });
+    expect(plan[0]).toMatchObject({ type: 'attach_resource', resourceId: 'opn', via: 'mac' });
+  });
+
   it('keeps ignored candidates ignored and refreshes them', () => {
     const plan = reconcile({ ...base, items: [item('x')], resources: [], candidates: [{ id: 'c1', identityKey: 'x', status: 'ignored' }] });
     expect(plan).toEqual([expect.objectContaining({ type: 'touch_candidate', candidateId: 'c1' })]);
