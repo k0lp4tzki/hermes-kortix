@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, patch, post, put } from '../lib/api';
 import { ago, dur } from '../lib/format';
 import { useAuth } from '../lib/auth';
 import { CRIT_LABEL, CRITS, KIND_LABEL, KINDS } from '../lib/meta';
 import { Badge, Empty, Field, Icon, Modal, useToast } from '../components/ui';
+import { actionIds, isTypeVisible, matchesSearch, onlyType, parseTypes, pruneSelection, sendDecision, toggleType, typeCounts, visibleCandidates, writeTypes } from '../lib/discoveryFilter';
 
 export default function Discovery() {
   const [tab, setTab] = useState('pending');
@@ -39,43 +41,69 @@ function Candidates({ status, all, loading }: { status: string; all: any[]; load
   const qc = useQueryClient();
   const toast = useToast();
   const { can } = useAuth();
+  const [params, setParams] = useSearchParams();
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [monitor, setMonitor] = useState(true);
   const [rule, setRule] = useState(false);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => setSel(new Set()), [status]);
-  const list = all.filter((c) => c.status === status && (!search || `${c.name} ${summary(c)} ${c.parent_name ?? ''}`.toLowerCase().includes(search.toLowerCase())));
+  // the type filter belongs to the Inbox; the other lists show everything
+  const filtered = status === 'pending';
+  const types = filtered ? parseTypes(params) : null;
+  const inStatus = useMemo(() => all.filter((c) => c.status === status), [all, status]);
+  const searched = useMemo(() => inStatus.filter((c) => matchesSearch(c, summary(c), search)), [inStatus, search]);
+  const available = useMemo(() => typeCounts(inStatus).map((t) => t.kind), [inStatus]);
+  const counts = useMemo(() => {
+    const m = new Map(typeCounts(searched).map((t) => [t.kind, t.count]));
+    return typeCounts(inStatus).map((t) => ({ ...t, count: m.get(t.kind) ?? 0 }));
+  }, [inStatus, searched]);
+  const list = useMemo(() => visibleCandidates(all, { status, search, types, text: summary }), [all, status, search, params, filtered]);
+  // marks on entries that are no longer visible are dropped, so nothing hidden is ever acted on
+  const visibleKey = list.map((c) => c.id).join(',');
+  useEffect(() => setSel((s) => pruneSelection(s, list)), [visibleKey]);
+  const ids = actionIds(sel, list);
+  const setTypes = (t: Set<string> | null) => setParams(writeTypes(params, t, available), { replace: true });
+  const resetFilter = () => { setTypes(null); setSearch(''); };
   const act = useMutation({
-    mutationFn: ({ action, ids }: { action: string; ids: string[] }) => post(`/discovery/candidates/${action}`, { ids, enable_monitoring: monitor, create_rule: rule }),
-    onSuccess: (_, v) => { qc.invalidateQueries({ queryKey: ['discovery'] }); qc.invalidateQueries({ queryKey: ['resources'] }); setSel(new Set()); toast(v.action === 'approve' ? 'Ins Inventar übernommen' : v.action === 'ignore' ? 'Ignoriert' : 'Zurück in die Inbox'); },
+    mutationFn: ({ action, ids }: { action: 'approve' | 'ignore' | 'reset'; ids: string[] }) => sendDecision(post, action, ids, { enable_monitoring: monitor, create_rule: rule }),
+    onSuccess: (_, v) => { qc.invalidateQueries({ queryKey: ['discovery'] }); qc.invalidateQueries({ queryKey: ['resources'] }); setSel(new Set()); toast(v.action === 'approve' ? `${v.ids.length} ins Inventar übernommen` : v.action === 'ignore' ? `${v.ids.length} ignoriert` : 'Zurück in die Inbox'); },
     onError: (e: Error) => toast(e.message, true),
   });
-  const ids = [...sel];
+  const filterActive = types !== null || search !== '';
+  const allMarked = list.length > 0 && list.every((c) => sel.has(c.id));
   return (
     <>
+      {filtered && inStatus.length > 0 && <TypeFilter counts={counts} types={types} onChange={setTypes} available={available} />}
       <div className="toolbar">
         {status === 'pending' && can('operator') && <>
-          <button className="primary" disabled={!sel.size || act.isPending} onClick={() => act.mutate({ action: 'approve', ids })}><Icon name="check" />Übernehmen ({sel.size})</button>
+          <button className="primary" disabled={!ids.length || act.isPending} onClick={() => act.mutate({ action: 'approve', ids })}><Icon name="check" />{ids.length ? `${ids.length} übernehmen` : 'Übernehmen'}</button>
           <label className="check"><input type="checkbox" checked={monitor} onChange={(e) => setMonitor(e.target.checked)} />mit Überwachung</label>
-          <button disabled={!sel.size} onClick={() => act.mutate({ action: 'ignore', ids })}>Ignorieren</button>
+          <button disabled={!ids.length || act.isPending} onClick={() => act.mutate({ action: 'ignore', ids })}>{ids.length ? `${ids.length} ignorieren` : 'Ignorieren'}</button>
           <label className="check" title="Legt pro Eintrag eine Ignorier-Regel an, damit er auch nach Neuerkennung ignoriert bleibt"><input type="checkbox" checked={rule} onChange={(e) => setRule(e.target.checked)} />dauerhaft (Regel)</label>
         </>}
-        {status === 'ignored' && can('operator') && <button disabled={!sel.size} onClick={() => act.mutate({ action: 'reset', ids })}>Zurück in die Inbox</button>}
+        {status === 'ignored' && can('operator') && <button disabled={!ids.length} onClick={() => act.mutate({ action: 'reset', ids })}>{ids.length ? `${ids.length} zurück in die Inbox` : 'Zurück in die Inbox'}</button>}
+        {status !== 'accepted' && <span className="sub" aria-live="polite">{ids.length} von {list.length} sichtbaren markiert{list.length < inStatus.length && ` · ${inStatus.length - list.length} ausgeblendet`}</span>}
         <div className="spacer" />
         <div className="search"><Icon name="search" /><input placeholder="Funde durchsuchen" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
       </div>
       <div className="panel flush table-wrap">
-        {loading ? <Empty>Lade…</Empty> : list.length === 0 ? <Empty>{status === 'pending' ? 'Die Inbox ist leer. Neue Funde der Discovery-Quellen erscheinen hier.' : 'Keine Einträge.'}</Empty> : (
+        {loading ? <Empty>Lade…</Empty> : list.length === 0 ? (inStatus.length > 0 && filterActive ? (
+          <div className="empty">
+            <div>Kein Fund passt zum Filter{types !== null && types.size === 0 ? ' – es ist kein Typ ausgewählt' : ''}.</div>
+            <div className="dim" style={{ marginTop: 4 }}>{inStatus.length} {inStatus.length === 1 ? 'Eintrag ist' : 'Einträge sind'} ausgeblendet.</div>
+            <button style={{ marginTop: 12 }} onClick={resetFilter}><Icon name="x" />Filter zurücksetzen</button>
+          </div>
+        ) : <Empty>{status === 'pending' ? 'Die Inbox ist leer. Neue Funde der Discovery-Quellen erscheinen hier.' : 'Keine Einträge.'}</Empty>) : (
           <table className="t">
             <thead><tr>
-              {status !== 'accepted' && <th style={{ width: 28 }}><input type="checkbox" aria-label="Alle" checked={list.every((c) => sel.has(c.id))} onChange={(e) => setSel(e.target.checked ? new Set(list.map((c) => c.id)) : new Set())} /></th>}
+              {status !== 'accepted' && <th style={{ width: 28 }}><input type="checkbox" aria-label="Alle sichtbaren auswählen" title="Alle sichtbaren auswählen" checked={allMarked} ref={(el) => { if (el) el.indeterminate = !allMarked && ids.length > 0; }} onChange={(e) => setSel(e.target.checked ? new Set(list.map((c) => c.id)) : new Set())} /></th>}
               <th>Typ</th><th>Name</th><th>Host</th><th>Details</th><th>Quelle</th><th>Zuerst gesehen</th><th>Zuletzt gesehen</th><th>Entscheidung</th>
             </tr></thead>
             <tbody>{list.map((c) => [
               <tr key={c.id} className="click" onClick={() => setOpen(open === c.id ? null : c.id)}>
                 {status !== 'accepted' && <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={c.name} checked={sel.has(c.id)} onChange={() => { const s = new Set(sel); s.has(c.id) ? s.delete(c.id) : s.add(c.id); setSel(s); }} /></td>}
-                <td>{KIND_LABEL[c.kind] ?? c.kind}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{KIND_LABEL[c.kind] ?? c.kind}</td>
                 <td style={{ fontWeight: 500 }}>{c.name}</td>
                 <td className="dim">{c.parent_name ?? (c.parent_identity_key ? <span title={c.parent_identity_key}>noch nicht übernommen</span> : '–')}</td>
                 <td className="mono dim" style={{ fontSize: 11.5, maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary(c)}</td>
@@ -93,6 +121,30 @@ function Candidates({ status, all, loading }: { status: string; all: any[]; load
         )}
       </div>
     </>
+  );
+}
+
+/** Multi-select of the types that occur in the Inbox, each with its count. Two clicks at most for "only X"; one to hide X. */
+function TypeFilter({ counts, types, available, onChange }: { counts: Array<{ kind: string; label: string; count: number }>; types: Set<string> | null; available: string[]; onChange: (t: Set<string> | null) => void }) {
+  const none = types !== null && types.size === 0;
+  return (
+    <div className="toolbar type-filter" role="group" aria-label="Nach Typ filtern">
+      <span className="type-filter-label">Typ</span>
+      <button className={`chip ${types === null ? 'on' : ''}`} aria-pressed={types === null} onClick={() => onChange(null)}>Alle</button>
+      <button className={`chip ${none ? 'on' : ''}`} aria-pressed={none} onClick={() => onChange(new Set())}>Keine</button>
+      <span className="type-filter-sep" />
+      {counts.map((t) => {
+        const on = isTypeVisible(types, t.kind);
+        return (
+          <span key={t.kind} className={`chip-pair ${on ? 'on' : ''}`}>
+            <button className={`chip ${on ? 'on' : ''}`} aria-pressed={on} title={on ? `${t.label} ausblenden` : `${t.label} einblenden`} onClick={() => onChange(toggleType(types, t.kind, available))}>
+              <span className="box" aria-hidden>{on && <Icon name="check" size={11} />}</span>{t.label}<span className="n">{t.count}</span>
+            </button>
+            <button className="chip only" title={`Nur ${t.label} anzeigen`} aria-label={`Nur ${t.label}`} onClick={() => onChange(onlyType(t.kind))}>nur</button>
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
