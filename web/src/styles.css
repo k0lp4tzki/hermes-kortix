@@ -208,6 +208,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
   .side .brand, .side .side-foot, .nav-sep { display: none; }
   .grid2, .grid3, .form-grid { grid-template-columns: 1fr; }
   .search input { width: 100%; }
+  .type-filter-sep { display: none; }
 }
 button.primary:disabled { background: var(--panel-2); border-color: var(--line-2); color: var(--muted); }
 
