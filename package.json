@@ -5,7 +5,7 @@
   "description": "Hermes - agentless homelab monitoring platform",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm --filter @hermes/server test",
+    "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
   "packageManager": "pnpm@11.15.1"
