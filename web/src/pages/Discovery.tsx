@@ -103,7 +103,7 @@ function Candidates({ status, all, loading }: { status: string; all: any[]; load
             <tbody>{list.map((c) => [
               <tr key={c.id} className="click" onClick={() => setOpen(open === c.id ? null : c.id)}>
                 {status !== 'accepted' && <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={c.name} checked={sel.has(c.id)} onChange={() => { const s = new Set(sel); s.has(c.id) ? s.delete(c.id) : s.add(c.id); setSel(s); }} /></td>}
-                <td>{KIND_LABEL[c.kind] ?? c.kind}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{KIND_LABEL[c.kind] ?? c.kind}</td>
                 <td style={{ fontWeight: 500 }}>{c.name}</td>
                 <td className="dim">{c.parent_name ?? (c.parent_identity_key ? <span title={c.parent_identity_key}>noch nicht übernommen</span> : '–')}</td>
                 <td className="mono dim" style={{ fontSize: 11.5, maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary(c)}</td>
